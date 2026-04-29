@@ -34,6 +34,15 @@ class PatchReport:
     diff: str
 
 
+@dataclass(frozen=True)
+class CustomExecutableEntry:
+    index: int
+    title: str
+    binary: str
+    working_directory: str
+    arguments: str
+
+
 _SECTION_RE = re.compile(r"^\[(?P<name>[^\]]+)\]\s*$")
 _CUSTOM_ENTRY_RE = re.compile(r"^(?P<idx>\d+)\\(?P<key>[^=]+)=(?P<value>.*)$")
 
@@ -429,6 +438,48 @@ def _parse_int(value: str) -> int | None:
         return int(value.strip())
     except Exception:
         return None
+
+
+def inspect_custom_executables(ini_path: Path) -> tuple[CustomExecutableEntry, ...]:
+    """Return current [customExecutables] entries without looking at recentDirectories."""
+    if not ini_path.exists():
+        return ()
+
+    text, _ = _read_text_preserve(ini_path)
+    lines = _split_lines_keepends(text)
+    section_ranges = _find_section_ranges(lines)
+    if "customExecutables" not in section_ranges:
+        return ()
+
+    start, end = section_ranges["customExecutables"]
+    entries: dict[str, dict[str, str]] = {}
+    for i in range(start + 1, end):
+        m = _CUSTOM_ENTRY_RE.match(_strip_eol(lines[i]))
+        if not m:
+            continue
+        idx = m.group("idx")
+        entries.setdefault(idx, {})[m.group("key")] = m.group("value")
+
+    out: list[CustomExecutableEntry] = []
+    for idx, values in entries.items():
+        parsed_idx = _parse_int(idx)
+        if parsed_idx is None:
+            continue
+        title = values.get("title", "").strip()
+        binary = values.get("binary", "").strip()
+        working_directory = values.get("workingDirectory", "").strip()
+        arguments = values.get("arguments", "").strip()
+        out.append(
+            CustomExecutableEntry(
+                index=parsed_idx,
+                title=title,
+                binary=binary,
+                working_directory=working_directory,
+                arguments=arguments,
+            )
+        )
+
+    return tuple(sorted(out, key=lambda entry: entry.index))
 
 
 def _custom_size_line(

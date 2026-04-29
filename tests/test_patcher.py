@@ -3,7 +3,13 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from mo2_path_wizard.patcher import PatchOptions, _apply_replacements, _build_replacements, patch_modorganizer_ini
+from mo2_path_wizard.patcher import (
+    PatchOptions,
+    _apply_replacements,
+    _build_replacements,
+    inspect_custom_executables,
+    patch_modorganizer_ini,
+)
 
 
 def _write_bytes(path: Path, text: str) -> None:
@@ -11,6 +17,36 @@ def _write_bytes(path: Path, text: str) -> None:
 
 
 class TestPatcher(unittest.TestCase):
+    def test_inspect_custom_executables_lists_current_entries_only(self) -> None:
+        ini_text = (
+            "[customExecutables]\r\n"
+            "size=2\r\n"
+            "1\\arguments=\r\n"
+            "1\\binary=G:/Pack/mods/SKSE/skse64_loader.exe\r\n"
+            "1\\title=SKSE\r\n"
+            "1\\workingDirectory=G:/Pack/mods/SKSE\r\n"
+            "2\\arguments=\r\n"
+            "2\\binary=G:/Pack/mods/Pandora/Pandora Behaviour Engine+.exe\r\n"
+            "2\\title=Pandora Behaviour Engine+\r\n"
+            "2\\workingDirectory=G:/Pack/mods/Pandora\r\n"
+            "\r\n"
+            "[recentDirectories]\r\n"
+            "size=1\r\n"
+            "1\\name=editExecutableBinary\r\n"
+            "1\\directory=G:/Pack/mods/Nemesis/Nemesis_Engine\r\n"
+        )
+
+        with TemporaryDirectory() as td:
+            ini_path = Path(td) / "ModOrganizer.ini"
+            _write_bytes(ini_path, ini_text)
+
+            entries = inspect_custom_executables(ini_path)
+
+        self.assertEqual([entry.index for entry in entries], [1, 2])
+        self.assertEqual([entry.title for entry in entries], ["SKSE", "Pandora Behaviour Engine+"])
+        self.assertEqual(entries[0].binary, "G:/Pack/mods/SKSE/skse64_loader.exe")
+        self.assertNotIn("Nemesis", [entry.title for entry in entries])
+
     def test_replacements_do_not_match_path_prefix_siblings(self) -> None:
         replacements = _build_replacements("F:/HGM", "F:/HGM2")
 

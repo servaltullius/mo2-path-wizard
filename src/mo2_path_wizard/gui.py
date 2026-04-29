@@ -4,11 +4,104 @@ import json
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from mo2_path_wizard.discovery import discover_from_root
-from mo2_path_wizard.patcher import PatchOptions, PatchReport, patch_modorganizer_ini
+from mo2_path_wizard.patcher import (
+    CustomExecutableEntry,
+    PatchOptions,
+    PatchReport,
+    inspect_custom_executables,
+    patch_modorganizer_ini,
+)
+
+
+@dataclass(frozen=True)
+class _PreviewContext:
+    ini_path: Path | None
+    instance_root: Path | None
+    game_path: Path | None
+    tool_root: Path | None
+    executables: tuple[CustomExecutableEntry, ...]
+
+
+def _display_path(path: Path | None) -> str:
+    if path is None:
+        return "(감지 안 됨)"
+    return str(path).replace("\\", "/")
+
+
+def _display_ini_value(value: str) -> str:
+    return value.replace("\\\\", "\\").replace("\\", "/")
+
+
+def _format_preview_context(context: _PreviewContext) -> str:
+    lines = [
+        "[현재 감지된 경로]",
+        f"- INI: {_display_path(context.ini_path)}",
+        f"- 모드팩: {_display_path(context.instance_root)}",
+        f"- Stock Game: {_display_path(context.game_path)}",
+        f"- Tools: {_display_path(context.tool_root)}",
+        "",
+        "[현재 등록된 실행 파일]",
+    ]
+    if not context.executables:
+        lines.append("- 등록된 실행 파일을 찾지 못했습니다.")
+    else:
+        for entry in context.executables:
+            title = entry.title or "(제목 없음)"
+            lines.append(f"{entry.index}. {title}")
+            if entry.binary:
+                lines.append(f"   실행 파일: {_display_ini_value(entry.binary)}")
+            if entry.working_directory:
+                lines.append(f"   작업 폴더: {_display_ini_value(entry.working_directory)}")
+    return "\n".join(lines)
+
+
+def _format_run_output(
+    *,
+    dry_run: bool,
+    context: _PreviewContext,
+    discovery_warnings: tuple[str, ...],
+    report: PatchReport,
+) -> str:
+    parts: list[str] = []
+
+    if dry_run:
+        parts.append(
+            "\n".join(
+                [
+                    "이 화면은 전체 INI 파일 원문이 아니라 현재 상태 요약과 변경될 diff를 보여줍니다.",
+                    "변경되지 않는 원본 줄은 diff 영역에서 생략될 수 있습니다.",
+                    "",
+                    _format_preview_context(context),
+                ]
+            )
+        )
+
+    if discovery_warnings:
+        parts.append("[자동감지 경고]\n" + "\n".join(f"[warn] {w}" for w in discovery_warnings))
+
+    summary = report.summary.rstrip("\n")
+    if summary:
+        parts.append("[적용 예정 요약]" if dry_run else "[실행 결과]")
+        parts.append(summary)
+
+    if report.diff:
+        parts.append(
+            "\n".join(
+                [
+                    "[변경 diff]",
+                    "아래 diff에서 - 는 현재 파일, + 는 적용 후 내용입니다.",
+                    "",
+                    report.diff.rstrip("\n"),
+                ]
+            )
+        )
+
+    return "\n\n".join(p for p in parts if p) + "\n"
 
 
 class _App(tk.Tk):
@@ -27,6 +120,7 @@ class _App(tk.Tk):
         self.apply_arg_presets = tk.BooleanVar(value=False)
         self.auto_add_missing = tk.BooleanVar(value=True)
         self.skip_pandora = tk.BooleanVar(value=False)
+        self.skip_nemesis = tk.BooleanVar(value=False)
         self.no_backup = tk.BooleanVar(value=False)
 
         self.lang = tk.StringVar(value="korean")
@@ -193,6 +287,12 @@ class _App(tk.Tk):
         ttk.Checkbutton(
             option_grid, text="백업(.bak) 만들지 않음", variable=self.no_backup, style="Card.TCheckbutton"
         ).grid(row=1, column=1, sticky="w", pady=3, padx=(12, 0))
+        ttk.Checkbutton(
+            option_grid,
+            text="Nemesis 자동 추가 제외",
+            variable=self.skip_nemesis,
+            style="Card.TCheckbutton",
+        ).grid(row=2, column=0, sticky="w", pady=3)
 
         select_row = ttk.Frame(options, style="Card.TFrame")
         select_row.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -238,7 +338,7 @@ class _App(tk.Tk):
 
         out_header = ttk.Frame(output_side, style="App.TFrame")
         out_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(out_header, text="미리보기/실행 결과", style="PanelTitle.TLabel").pack(side="left")
+        ttk.Label(out_header, text="현재 상태 및 변경 미리보기", style="PanelTitle.TLabel").pack(side="left")
         ttk.Button(out_header, text="복사", style="Ghost.TButton", command=self._copy_output).pack(side="right")
         ttk.Button(out_header, text="지우기", style="Ghost.TButton", command=self._clear_output).pack(side="right", padx=(0, 8))
 
@@ -409,7 +509,7 @@ class _App(tk.Tk):
         except Exception:
             self.status.set("복사 실패")
 
-    def _patch_job(self, dry_run: bool) -> tuple[object | None, PatchReport]:
+    def _patch_job(self, dry_run: bool) -> tuple[object | None, _PreviewContext, PatchReport]:
         root = Path(self.pack_root.get()).expanduser() if self.pack_root.get().strip() else None
         discovered = None
         if root and root.is_dir():
@@ -445,10 +545,16 @@ class _App(tk.Tk):
                     if isinstance(k, str) and isinstance(v, str):
                         args_overrides[k.strip().lower()] = v
 
+        skip_auto_add_titles: list[str] = []
+        if self.skip_pandora.get():
+            skip_auto_add_titles.append("Pandora Behaviour Engine+")
+        if self.skip_nemesis.get():
+            skip_auto_add_titles.append("Nemesis")
+
         options = PatchOptions(
             apply_arg_presets=bool(self.apply_arg_presets.get()),
             auto_add_missing=bool(self.auto_add_missing.get()),
-            skip_auto_add_titles=("Pandora Behaviour Engine+",) if self.skip_pandora.get() else (),
+            skip_auto_add_titles=tuple(skip_auto_add_titles),
             skip_arg_preset_titles=("Pandora Behaviour Engine+",) if self.skip_pandora.get() else (),
             language=self.lang.get().strip() or "korean",
             edition=self.edition.get().strip() or "sse",
@@ -465,7 +571,14 @@ class _App(tk.Tk):
             tool_root=tool_root,
             options=options,
         )
-        return discovered, report
+        context = _PreviewContext(
+            ini_path=ini,
+            instance_root=instance_root,
+            game_path=game_path,
+            tool_root=tool_root,
+            executables=inspect_custom_executables(ini) if ini and ini.exists() else (),
+        )
+        return discovered, context, report
 
     def _run_async(self, *, dry_run: bool) -> None:
         if self._busy:
@@ -475,24 +588,34 @@ class _App(tk.Tk):
 
         def worker() -> None:
             try:
-                discovered, report = self._patch_job(dry_run=dry_run)
+                discovered, context, report = self._patch_job(dry_run=dry_run)
             except Exception as e:
                 self.after(0, lambda: self._on_run_error(e))
                 return
-            self.after(0, lambda: self._on_run_done(dry_run=dry_run, discovered=discovered, report=report))
+            self.after(
+                0,
+                lambda: self._on_run_done(
+                    dry_run=dry_run,
+                    discovered=discovered,
+                    context=context,
+                    report=report,
+                ),
+            )
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_run_done(self, *, dry_run: bool, discovered, report: PatchReport) -> None:
+    def _on_run_done(self, *, dry_run: bool, discovered, context: _PreviewContext, report: PatchReport) -> None:
         self._set_busy(False)
 
-        parts: list[str] = []
-        if discovered and getattr(discovered, "warnings", None):
-            parts.append("\n".join(f"[warn] {w}" for w in discovered.warnings))
-        if report.diff:
-            parts.append(report.diff.rstrip("\n"))
-        parts.append(report.summary.rstrip("\n"))
-        self._set_output("\n\n".join(p for p in parts if p) + "\n")
+        warnings = tuple(getattr(discovered, "warnings", ()) or ())
+        self._set_output(
+            _format_run_output(
+                dry_run=dry_run,
+                context=context,
+                discovery_warnings=warnings,
+                report=report,
+            )
+        )
 
         if not report.ok:
             self.status.set("오류")
