@@ -1,0 +1,31 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "master"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e . pyinstaller
+      - name: Test
+        run: |
+          python -m unittest discover -s tests -p "test*.py" -v
+      - name: Build
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\\build_windows.ps1
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mo2-path-wizard-windows
+          path: dist/*
+

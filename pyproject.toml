@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mo2-path-wizard"
+version = "1.0.2"
+description = "MO2(Mod Organizer 2) 경로/실행파일(Executables) 자동 세팅 패처"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+mo2-path-wizard = "mo2_path_wizard.cli:main"
+mo2-path-wizard-gui = "mo2_path_wizard.gui:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
