@@ -15,8 +15,8 @@ class _App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("MO2 Path Wizard")
-        self.geometry("980x680")
-        self.minsize(920, 620)
+        self.geometry("1040x720")
+        self.minsize(980, 660)
 
         self.pack_root = tk.StringVar()
         self.ini_path = tk.StringVar()
@@ -34,7 +34,7 @@ class _App(tk.Tk):
         self.args_json = tk.StringVar()
 
         self.show_advanced = tk.BooleanVar(value=False)
-        self.status = tk.StringVar(value="Ready")
+        self.status = tk.StringVar(value="준비됨")
         self._busy = False
 
         self._configure_style()
@@ -48,10 +48,22 @@ class _App(tk.Tk):
         return "TkDefaultFont"
 
     def _configure_style(self) -> None:
-        bg = "#F6F7FB"
-        card = "#FFFFFF"
-        text = "#111827"
-        muted = "#6B7280"
+        palette = {
+            "bg": "#F4F6FA",
+            "panel": "#FFFFFF",
+            "panel_alt": "#F8FAFC",
+            "text": "#111827",
+            "muted": "#64748B",
+            "line": "#D8DEE9",
+            "accent": "#2563EB",
+            "accent_hover": "#1D4ED8",
+            "accent_dark": "#1E3A8A",
+            "hero": "#172033",
+            "hero_sub": "#CBD5E1",
+            "console": "#0B1120",
+            "console_text": "#D1D5DB",
+        }
+        self._palette = palette
 
         font_ui = self._pick_font_family("Segoe UI", "Inter", "Helvetica", "Arial")
         font_mono = self._pick_font_family("Cascadia Mono", "Consolas", "Menlo", "Courier New")
@@ -63,87 +75,128 @@ class _App(tk.Tk):
         theme = "clam" if "clam" in style.theme_names() else style.theme_use()
         style.theme_use(theme)
 
-        style.configure("App.TFrame", background=bg)
-        style.configure("Card.TFrame", background=card)
-        style.configure("TLabel", background=bg, foreground=text)
-        style.configure("Card.TLabel", background=card, foreground=text)
-        style.configure("Header.TLabel", background=bg, foreground=text, font=(font_ui, 18, "bold"))
-        style.configure("Subheader.TLabel", background=bg, foreground=muted, font=(font_ui, 10))
+        style.configure("App.TFrame", background=palette["bg"])
+        style.configure("Card.TFrame", background=palette["panel"])
+        style.configure("Output.TFrame", background=palette["console"])
+        style.configure("Status.TFrame", background=palette["panel_alt"], relief="flat")
 
-        style.configure("Card.TLabelframe", background=card, padding=(12, 10))
-        style.configure("Card.TLabelframe.Label", background=card, foreground=text, font=(font_ui, 10, "bold"))
+        style.configure("TLabel", background=palette["bg"], foreground=palette["text"])
+        style.configure("Card.TLabel", background=palette["panel"], foreground=palette["text"])
+        style.configure("Hint.TLabel", background=palette["panel"], foreground=palette["muted"], font=(font_ui, 9))
+        style.configure("Header.TLabel", background=palette["bg"], foreground=palette["text"], font=(font_ui, 18, "bold"))
+        style.configure("PanelTitle.TLabel", background=palette["bg"], foreground=palette["text"], font=(font_ui, 14, "bold"))
+        style.configure("Subheader.TLabel", background=palette["bg"], foreground=palette["muted"], font=(font_ui, 10))
+        style.configure("Status.TLabel", background=palette["panel_alt"], foreground=palette["muted"], font=(font_ui, 10))
 
-        style.configure("TCheckbutton", background=bg)
-        style.configure("Card.TCheckbutton", background=card)
+        style.configure("Hero.TFrame", background=palette["hero"])
+        style.configure("HeroTitle.TLabel", background=palette["hero"], foreground="#FFFFFF", font=(font_ui, 20, "bold"))
+        style.configure("HeroSub.TLabel", background=palette["hero"], foreground=palette["hero_sub"], font=(font_ui, 10))
+        style.configure(
+            "HeroBadge.TLabel",
+            background=palette["accent_dark"],
+            foreground="#FFFFFF",
+            font=(font_ui, 9, "bold"),
+            padding=(12, 6),
+        )
+
+        style.configure("Card.TLabelframe", background=palette["panel"], bordercolor=palette["line"], padding=(14, 12))
+        style.configure(
+            "Card.TLabelframe.Label",
+            background=palette["panel"],
+            foreground=palette["text"],
+            font=(font_ui, 10, "bold"),
+        )
+
+        style.configure("TCheckbutton", background=palette["bg"], foreground=palette["text"])
+        style.configure("Card.TCheckbutton", background=palette["panel"], foreground=palette["text"])
         style.configure("TEntry", padding=(6, 4))
-        style.configure("TButton", padding=(10, 6))
+        style.configure("Path.TEntry", padding=(8, 6))
+        style.configure("TButton", padding=(10, 6), font=(font_ui, 10))
+        style.configure("Primary.TButton", padding=(16, 8), font=(font_ui, 10, "bold"), background=palette["accent"], foreground="#FFFFFF")
+        style.configure("Secondary.TButton", padding=(16, 8), font=(font_ui, 10, "bold"))
+        style.configure("Ghost.TButton", padding=(10, 5), font=(font_ui, 9))
+        style.configure("Browse.TButton", padding=(9, 5), font=(font_ui, 9))
+        style.map(
+            "Primary.TButton",
+            background=[("disabled", "#93C5FD"), ("pressed", palette["accent_dark"]), ("active", palette["accent_hover"])],
+            foreground=[("disabled", "#EFF6FF"), ("pressed", "#FFFFFF"), ("active", "#FFFFFF")],
+        )
 
-        self.configure(background=bg)
+        self.configure(background=palette["bg"])
 
     def _build(self) -> None:
-        root = ttk.Frame(self, style="App.TFrame", padding=16)
+        root = ttk.Frame(self, style="App.TFrame", padding=18)
         root.grid(row=0, column=0, sticky="nsew")
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
-        root.columnconfigure(0, weight=0)
+        root.columnconfigure(0, weight=0, minsize=430)
         root.columnconfigure(1, weight=1)
-        root.rowconfigure(0, weight=1)
+        root.rowconfigure(1, weight=1)
 
         controls = ttk.Frame(root, style="App.TFrame")
-        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        controls.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
         controls.columnconfigure(0, weight=1)
 
         output_side = ttk.Frame(root, style="App.TFrame")
-        output_side.grid(row=0, column=1, sticky="nsew")
+        output_side.grid(row=1, column=1, sticky="nsew")
         output_side.columnconfigure(0, weight=1)
         output_side.rowconfigure(1, weight=1)
 
-        ttk.Label(controls, text="MO2 Path Wizard", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        hero = ttk.Frame(root, style="Hero.TFrame", padding=(18, 14))
+        hero.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 16))
+        hero.columnconfigure(0, weight=1)
+        ttk.Label(hero, text="MO2 Path Wizard", style="HeroTitle.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
-            controls,
-            text="ModOrganizer.ini 경로/Executables 자동 복구 도구 (Preview → Apply)",
-            style="Subheader.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(2, 12))
+            hero,
+            text="ModOrganizer.ini 경로와 실행 파일 설정을 안전하게 점검하고 적용합니다.",
+            style="HeroSub.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+        ttk.Label(hero, text="MO2 종료 권장", style="HeroBadge.TLabel").grid(row=0, column=1, rowspan=2, sticky="e")
 
-        modpack = ttk.Labelframe(controls, text="Modpack", style="Card.TLabelframe")
-        modpack.grid(row=2, column=0, sticky="ew")
+        modpack = ttk.Labelframe(controls, text="모드팩", style="Card.TLabelframe")
+        modpack.grid(row=0, column=0, sticky="ew")
         modpack.columnconfigure(0, weight=1)
 
         self._path_row(modpack, "모드팩 폴더", self.pack_root, kind="dir", row=0)
-        self.btn_auto_detect = ttk.Button(modpack, text="자동 감지", command=self._auto_detect)
-        self.btn_auto_detect.grid(row=1, column=0, sticky="e", pady=(8, 0))
+        modpack_footer = ttk.Frame(modpack, style="Card.TFrame")
+        modpack_footer.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        modpack_footer.columnconfigure(0, weight=1)
+        ttk.Label(modpack_footer, text="루트 폴더 선택 후 자동 감지를 실행하세요.", style="Hint.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.btn_auto_detect = ttk.Button(
+            modpack_footer, text="자동 감지", style="Secondary.TButton", command=self._auto_detect
+        )
+        self.btn_auto_detect.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
-        options = ttk.Labelframe(controls, text="Options", style="Card.TLabelframe")
-        options.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        options = ttk.Labelframe(controls, text="실행 옵션", style="Card.TLabelframe")
+        options.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         options.columnconfigure(0, weight=1)
 
-        chk_row = ttk.Frame(options, style="Card.TFrame")
-        chk_row.grid(row=0, column=0, sticky="ew")
+        option_grid = ttk.Frame(options, style="Card.TFrame")
+        option_grid.grid(row=0, column=0, sticky="ew")
+        option_grid.columnconfigure(0, weight=1)
+        option_grid.columnconfigure(1, weight=1)
         ttk.Checkbutton(
-            chk_row, text="누락 Executables 자동 추가", variable=self.auto_add_missing, style="Card.TCheckbutton"
-        ).pack(side="left")
+            option_grid, text="누락 Executables 자동 추가", variable=self.auto_add_missing, style="Card.TCheckbutton"
+        ).grid(row=0, column=0, sticky="w", pady=3)
         ttk.Checkbutton(
-            chk_row, text="arguments 프리셋 적용(덮어쓰기)", variable=self.apply_arg_presets, style="Card.TCheckbutton"
-        ).pack(
-            side="left", padx=(10, 0)
-        )
-        ttk.Checkbutton(chk_row, text="백업(.bak) 만들지 않음", variable=self.no_backup, style="Card.TCheckbutton").pack(
-            side="left", padx=(10, 0)
-        )
-
-        skip_row = ttk.Frame(options, style="Card.TFrame")
-        skip_row.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+            option_grid, text="arguments 프리셋 적용", variable=self.apply_arg_presets, style="Card.TCheckbutton"
+        ).grid(row=0, column=1, sticky="w", pady=3, padx=(12, 0))
         ttk.Checkbutton(
-            skip_row,
+            option_grid,
             text="Pandora 자동 추가/프리셋 제외",
             variable=self.skip_pandora,
             style="Card.TCheckbutton",
-        ).pack(side="left")
+        ).grid(row=1, column=0, sticky="w", pady=3)
+        ttk.Checkbutton(
+            option_grid, text="백업(.bak) 만들지 않음", variable=self.no_backup, style="Card.TCheckbutton"
+        ).grid(row=1, column=1, sticky="w", pady=3, padx=(12, 0))
 
         select_row = ttk.Frame(options, style="Card.TFrame")
-        select_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        ttk.Label(select_row, text="에디션", style="Card.TLabel").pack(side="left")
+        select_row.grid(row=1, column=0, sticky="ew", pady=(12, 0))
+        ttk.Label(select_row, text="게임 에디션", style="Card.TLabel").pack(side="left")
         ttk.Combobox(select_row, textvariable=self.edition, values=["sse", "vr", "le"], width=6, state="readonly").pack(
             side="left", padx=(6, 14)
         )
@@ -153,41 +206,43 @@ class _App(tk.Tk):
         )
 
         advanced_toggle = ttk.Frame(controls, style="App.TFrame")
-        advanced_toggle.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        advanced_toggle.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         ttk.Checkbutton(
             advanced_toggle, text="고급 경로 옵션 표시", variable=self.show_advanced, command=self._toggle_advanced
         ).pack(side="left")
 
-        self.advanced_frame = ttk.Labelframe(controls, text="Advanced Paths", style="Card.TLabelframe")
+        self.advanced_frame = ttk.Labelframe(controls, text="고급 경로", style="Card.TLabelframe")
         self.advanced_frame.columnconfigure(0, weight=1)
         self._path_row(self.advanced_frame, "ModOrganizer.ini", self.ini_path, kind="ini", row=0)
         self._path_row(self.advanced_frame, "인스턴스 루트", self.instance_root, kind="dir", row=1)
         self._path_row(self.advanced_frame, "Stock Game 경로", self.game_path, kind="dir", row=2)
         self._path_row(self.advanced_frame, "tools/Tool 경로", self.tool_root, kind="dir", row=3)
         self._path_row(self.advanced_frame, "args JSON(옵션)", self.args_json, kind="json", row=4)
-        self.advanced_frame.grid(row=5, column=0, sticky="ew", pady=(10, 0))
+        self.advanced_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         self.advanced_frame.grid_remove()
 
         actions = ttk.Frame(controls, style="App.TFrame")
-        actions.grid(row=6, column=0, sticky="ew", pady=(14, 0))
-        self.btn_preview = ttk.Button(actions, text="미리보기(Preview)", command=self._preview)
-        self.btn_preview.pack(side="left")
-        self.btn_apply = ttk.Button(actions, text="적용(Apply)", command=self._apply)
-        self.btn_apply.pack(side="left", padx=(10, 0))
+        actions.grid(row=4, column=0, sticky="ew", pady=(14, 0))
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        self.btn_preview = ttk.Button(actions, text="미리보기", style="Secondary.TButton", command=self._preview)
+        self.btn_preview.grid(row=0, column=0, sticky="ew")
+        self.btn_apply = ttk.Button(actions, text="적용", style="Primary.TButton", command=self._apply)
+        self.btn_apply.grid(row=0, column=1, sticky="ew", padx=(10, 0))
 
-        status_bar = ttk.Frame(root, style="App.TFrame")
-        status_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        ttk.Label(status_bar, textvariable=self.status, style="Subheader.TLabel").pack(side="left")
+        status_bar = ttk.Frame(root, style="Status.TFrame", padding=(12, 8))
+        status_bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ttk.Label(status_bar, textvariable=self.status, style="Status.TLabel").pack(side="left")
         self.progress = ttk.Progressbar(status_bar, mode="indeterminate", length=120)
         self.progress.pack(side="right")
 
         out_header = ttk.Frame(output_side, style="App.TFrame")
         out_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(out_header, text="Output", style="Header.TLabel").pack(side="left")
-        ttk.Button(out_header, text="복사", command=self._copy_output).pack(side="right")
-        ttk.Button(out_header, text="지우기", command=self._clear_output).pack(side="right", padx=(0, 8))
+        ttk.Label(out_header, text="미리보기/실행 결과", style="PanelTitle.TLabel").pack(side="left")
+        ttk.Button(out_header, text="복사", style="Ghost.TButton", command=self._copy_output).pack(side="right")
+        ttk.Button(out_header, text="지우기", style="Ghost.TButton", command=self._clear_output).pack(side="right", padx=(0, 8))
 
-        out = ttk.Frame(output_side, style="Card.TFrame")
+        out = ttk.Frame(output_side, style="Output.TFrame", padding=1)
         out.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         out.columnconfigure(0, weight=1)
         out.rowconfigure(0, weight=1)
@@ -197,10 +252,12 @@ class _App(tk.Tk):
             wrap="none",
             highlightthickness=0,
             borderwidth=0,
-            background="#FFFFFF",
-            foreground="#111827",
-            insertbackground="#111827",
-            selectbackground="#DBEAFE",
+            padx=12,
+            pady=10,
+            background=self._palette["console"],
+            foreground=self._palette["console_text"],
+            insertbackground="#E5E7EB",
+            selectbackground="#1D4ED8",
         )
         yscroll = ttk.Scrollbar(out, orient="vertical", command=self.output.yview)
         xscroll = ttk.Scrollbar(out, orient="horizontal", command=self.output.xview)
@@ -210,11 +267,11 @@ class _App(tk.Tk):
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
 
-        self.output.tag_configure("diff_add", foreground="#166534")
-        self.output.tag_configure("diff_del", foreground="#B91C1C")
-        self.output.tag_configure("diff_hunk", foreground="#1D4ED8")
-        self.output.tag_configure("diff_file", foreground="#374151")
-        self.output.tag_configure("warn", foreground="#B45309")
+        self.output.tag_configure("diff_add", foreground="#86EFAC")
+        self.output.tag_configure("diff_del", foreground="#FDA4AF")
+        self.output.tag_configure("diff_hunk", foreground="#93C5FD")
+        self.output.tag_configure("diff_file", foreground="#CBD5E1")
+        self.output.tag_configure("warn", foreground="#FBBF24")
 
         self.output.configure(state="disabled")
 
@@ -223,9 +280,11 @@ class _App(tk.Tk):
         r.grid(row=row, column=0, sticky="ew", pady=4)
         r.columnconfigure(1, weight=1)
 
-        ttk.Label(r, text=label, style="Card.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(r, textvariable=var).grid(row=0, column=1, sticky="ew")
-        ttk.Button(r, text="찾기...", command=lambda: self._browse(var, kind)).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        ttk.Label(r, text=label, style="Card.TLabel", width=15).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Entry(r, textvariable=var, style="Path.TEntry").grid(row=0, column=1, sticky="ew")
+        ttk.Button(r, text="찾기", style="Browse.TButton", command=lambda: self._browse(var, kind)).grid(
+            row=0, column=2, sticky="e", padx=(8, 0)
+        )
 
     def _toggle_advanced(self) -> None:
         if bool(self.show_advanced.get()):
@@ -263,10 +322,10 @@ class _App(tk.Tk):
         root = Path(self.pack_root.get()).expanduser()
         if not root.is_dir():
             messagebox.showerror("오류", "모드팩 폴더를 먼저 선택해 주세요.")
-            self.status.set("Error")
+            self.status.set("오류")
             return
 
-        self._set_busy(True, "Detecting...")
+        self._set_busy(True, "자동 감지 중...")
 
         def worker() -> None:
             try:
@@ -291,10 +350,10 @@ class _App(tk.Tk):
 
         if discovered.warnings:
             self._set_output("\n".join(f"[warn] {w}" for w in discovered.warnings) + "\n")
-        self.status.set("Auto-detect complete")
+        self.status.set("자동 감지 완료")
 
     def _on_detect_error(self, exc: Exception) -> None:
-        self._set_busy(False, "Error")
+        self._set_busy(False, "오류")
         messagebox.showerror("오류", str(exc))
 
     def _browse(self, var: tk.StringVar, kind: str) -> None:
@@ -346,9 +405,9 @@ class _App(tk.Tk):
             text = self.output.get("1.0", "end").rstrip("\n")
             self.clipboard_clear()
             self.clipboard_append(text)
-            self.status.set("Output copied to clipboard")
+            self.status.set("출력 복사됨")
         except Exception:
-            self.status.set("Copy failed")
+            self.status.set("복사 실패")
 
     def _patch_job(self, dry_run: bool) -> tuple[object | None, PatchReport]:
         root = Path(self.pack_root.get()).expanduser() if self.pack_root.get().strip() else None
@@ -412,7 +471,7 @@ class _App(tk.Tk):
         if self._busy:
             return
 
-        self._set_busy(True, "Running..." if dry_run else "Applying...")
+        self._set_busy(True, "미리보기 생성 중..." if dry_run else "적용 중...")
 
         def worker() -> None:
             try:
@@ -436,13 +495,13 @@ class _App(tk.Tk):
         self._set_output("\n\n".join(p for p in parts if p) + "\n")
 
         if not report.ok:
-            self.status.set("Error")
+            self.status.set("오류")
             messagebox.showerror("오류", report.summary)
             return
-        self.status.set("Preview complete" if dry_run else "Done")
+        self.status.set("미리보기 완료" if dry_run else "적용 완료")
 
     def _on_run_error(self, exc: Exception) -> None:
-        self._set_busy(False, "Error")
+        self._set_busy(False, "오류")
         messagebox.showerror("오류", str(exc))
 
     def _preview(self) -> None:

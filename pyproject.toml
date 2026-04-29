@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mo2-path-wizard"
-version = "1.0.2"
+version = "1.0.3"
 description = "MO2(Mod Organizer 2) 경로/실행파일(Executables) 자동 세팅 패처"
 readme = "README.md"
 requires-python = ">=3.10"
