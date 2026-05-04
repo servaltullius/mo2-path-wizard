@@ -25,6 +25,7 @@ class _PreviewContext:
     game_path: Path | None
     tool_root: Path | None
     executables: tuple[CustomExecutableEntry, ...]
+    behavior_engine_auto_detect: bool = True
 
 
 def _display_path(path: Path | None) -> str:
@@ -37,6 +38,32 @@ def _display_ini_value(value: str) -> str:
     return value.replace("\\\\", "\\").replace("\\", "/")
 
 
+def _entry_text(entry: CustomExecutableEntry) -> str:
+    return " ".join((entry.title, entry.binary, entry.working_directory)).lower()
+
+
+def _format_behavior_engine_detection(context: _PreviewContext) -> str:
+    lines = ["[Pandora/Nemesis 자동 판단]"]
+    if not context.behavior_engine_auto_detect:
+        lines.append("- 꺼짐: Pandora/Nemesis는 수동 제외 옵션만 사용합니다.")
+        return "\n".join(lines)
+
+    has_pandora = any("pandora" in _entry_text(entry) for entry in context.executables)
+    has_nemesis = any("nemesis" in _entry_text(entry) for entry in context.executables)
+
+    if has_pandora and has_nemesis:
+        lines.append("- Pandora와 Nemesis가 모두 등록되어 있어 둘 다 자동 추가하지 않습니다.")
+        lines.append("- Pandora arguments 프리셋 덮어쓰기도 자동으로 제외합니다.")
+    elif has_pandora:
+        lines.append("- Pandora 등록됨: Nemesis 자동 추가를 자동으로 제외합니다.")
+        lines.append("- Pandora arguments 프리셋 덮어쓰기도 자동으로 제외합니다.")
+    elif has_nemesis:
+        lines.append("- Nemesis 등록됨: Pandora 자동 추가를 자동으로 제외합니다.")
+    else:
+        lines.append("- 등록된 Pandora/Nemesis가 없어 누락 Executables 자동 추가 옵션을 그대로 따릅니다.")
+    return "\n".join(lines)
+
+
 def _format_preview_context(context: _PreviewContext) -> str:
     lines = [
         "[현재 감지된 경로]",
@@ -44,6 +71,8 @@ def _format_preview_context(context: _PreviewContext) -> str:
         f"- 모드팩: {_display_path(context.instance_root)}",
         f"- Stock Game: {_display_path(context.game_path)}",
         f"- Tools: {_display_path(context.tool_root)}",
+        "",
+        _format_behavior_engine_detection(context),
         "",
         "[현재 등록된 실행 파일]",
     ]
@@ -119,6 +148,7 @@ class _App(tk.Tk):
 
         self.apply_arg_presets = tk.BooleanVar(value=False)
         self.auto_add_missing = tk.BooleanVar(value=True)
+        self.behavior_engine_auto_detect = tk.BooleanVar(value=True)
         self.skip_pandora = tk.BooleanVar(value=False)
         self.skip_nemesis = tk.BooleanVar(value=False)
         self.no_backup = tk.BooleanVar(value=False)
@@ -280,8 +310,8 @@ class _App(tk.Tk):
         ).grid(row=0, column=1, sticky="w", pady=3, padx=(12, 0))
         ttk.Checkbutton(
             option_grid,
-            text="Pandora 자동 추가/프리셋 제외",
-            variable=self.skip_pandora,
+            text="Pandora/Nemesis 자동 판단",
+            variable=self.behavior_engine_auto_detect,
             style="Card.TCheckbutton",
         ).grid(row=1, column=0, sticky="w", pady=3)
         ttk.Checkbutton(
@@ -289,10 +319,16 @@ class _App(tk.Tk):
         ).grid(row=1, column=1, sticky="w", pady=3, padx=(12, 0))
         ttk.Checkbutton(
             option_grid,
-            text="Nemesis 자동 추가 제외",
-            variable=self.skip_nemesis,
+            text="Pandora 강제 제외",
+            variable=self.skip_pandora,
             style="Card.TCheckbutton",
         ).grid(row=2, column=0, sticky="w", pady=3)
+        ttk.Checkbutton(
+            option_grid,
+            text="Nemesis 강제 제외",
+            variable=self.skip_nemesis,
+            style="Card.TCheckbutton",
+        ).grid(row=2, column=1, sticky="w", pady=3, padx=(12, 0))
 
         select_row = ttk.Frame(options, style="Card.TFrame")
         select_row.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -554,6 +590,7 @@ class _App(tk.Tk):
         options = PatchOptions(
             apply_arg_presets=bool(self.apply_arg_presets.get()),
             auto_add_missing=bool(self.auto_add_missing.get()),
+            behavior_engine_auto_detect=bool(self.behavior_engine_auto_detect.get()),
             skip_auto_add_titles=tuple(skip_auto_add_titles),
             skip_arg_preset_titles=("Pandora Behaviour Engine+",) if self.skip_pandora.get() else (),
             language=self.lang.get().strip() or "korean",
@@ -577,6 +614,7 @@ class _App(tk.Tk):
             game_path=game_path,
             tool_root=tool_root,
             executables=inspect_custom_executables(ini) if ini and ini.exists() else (),
+            behavior_engine_auto_detect=bool(self.behavior_engine_auto_detect.get()),
         )
         return discovered, context, report
 

@@ -49,6 +49,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Nemesis 자동 추가를 제외",
     )
     parser.add_argument(
+        "--no-behavior-engine-auto-detect",
+        action="store_true",
+        help="Pandora/Nemesis 자동 판단을 끔(수동 override가 필요할 때만 사용)",
+    )
+    parser.add_argument(
         "--apply-arg-presets",
         action="store_true",
         help="일부 툴(xEdit/DynDOLOD 등)에 권장 arguments 템플릿을 적용(기존 arguments를 덮어씀)",
@@ -125,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     options = PatchOptions(
         apply_arg_presets=args.apply_arg_presets,
         auto_add_missing=args.auto_add_missing,
+        behavior_engine_auto_detect=not args.no_behavior_engine_auto_detect,
         skip_auto_add_titles=tuple(skip_auto_add_titles),
         skip_arg_preset_titles=("Pandora Behaviour Engine+",) if args.skip_pandora else (),
         language=args.lang,

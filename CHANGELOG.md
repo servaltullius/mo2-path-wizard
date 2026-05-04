@@ -1,5 +1,36 @@
 # 변경 내역
 
+## v1.0.5 - 2026-05-04
+
+### 요약
+
+이번 릴리즈는 사용자가 Pandora/Nemesis 제외 옵션을 일일이 체크하지 않아도 프로그램이 현재 MO2 실행 항목을 보고 자동으로 판단하도록 바꾼 버전입니다.
+
+### 추가
+
+- 기본 켜짐인 `Pandora/Nemesis 자동 판단` 동작을 추가했습니다.
+- GUI 미리보기 상단에 `[Pandora/Nemesis 자동 판단]` 결과를 표시합니다.
+- CLI에 `--no-behavior-engine-auto-detect` 옵션을 추가했습니다.
+  - 특수 구성에서 자동 판단을 끄고 수동 override를 쓰고 싶을 때만 사용합니다.
+
+### 변경
+
+- INI에 Pandora가 이미 등록되어 있으면 Nemesis 자동 추가를 기본으로 제외합니다.
+- INI에 Pandora가 이미 등록되어 있으면 `arguments 프리셋 적용`이 켜져 있어도 Pandora arguments 프리셋을 기본으로 덮어쓰지 않습니다.
+- INI에 Nemesis가 이미 등록되어 있으면 Pandora 자동 추가를 기본으로 제외합니다.
+- GUI의 수동 옵션 문구를 `Pandora 강제 제외`, `Nemesis 강제 제외`로 바꿔 자동 판단과 역할을 구분했습니다.
+
+### 검증
+
+- 실제 `G:\TAKEALOOK` 기준으로 옵션을 일일이 체크하지 않아도 다음 상태가 되는지 확인했습니다.
+  - `Pandora/Nemesis 자동 판단 = True`
+  - `Pandora 등록됨` 안내 표시
+  - `auto-add: Nemesis` 없음
+  - `changed = False`
+- 전체 테스트 실행:
+  - `python -m unittest discover -s tests -p "test*.py" -v`
+  - 결과: 테스트 `20`개 통과
+
 ## v1.0.4 - 2026-04-29
 
 ### 요약

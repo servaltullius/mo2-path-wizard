@@ -464,6 +464,93 @@ class TestPatcher(unittest.TestCase):
             self.assertNotIn("\\title=Pandora Behaviour Engine+", patched)
             self.assertNotIn("Pandora Behaviour Engine+.exe", patched)
 
+    def test_existing_pandora_auto_detect_skips_nemesis_and_pandora_preset(self) -> None:
+        ini_text = (
+            "[customExecutables]\r\n"
+            "size=1\r\n"
+            "1\\arguments=\r\n"
+            "1\\binary=G:/Pack/mods/Pandora/Pandora Behaviour Engine+.exe\r\n"
+            "1\\hide=false\r\n"
+            "1\\ownicon=false\r\n"
+            "1\\steamAppID=\r\n"
+            "1\\title=Pandora Behaviour Engine+\r\n"
+            "1\\toolbar=true\r\n"
+            "1\\workingDirectory=G:/Pack/mods/Pandora\r\n"
+        )
+
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = tmp / "Pack"
+            mods = instance / "mods"
+            game = instance / "Stock Game"
+            nemesis = mods / "Nemesis Unlimited Behavior Engine"
+            nemesis.mkdir(parents=True)
+            (nemesis / "Nemesis Unlimited Behavior Engine.exe").write_bytes(b"")
+            (game / "Data").mkdir(parents=True)
+            (game / "SkyrimSE.exe").write_bytes(b"")
+
+            ini_path = instance / "ModOrganizer.ini"
+            ini_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_bytes(ini_path, ini_text)
+
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance,
+                game_path=game,
+                tool_root=None,
+                options=PatchOptions(auto_add_missing=True, apply_arg_presets=True, backup=False),
+            )
+            patched = ini_path.read_text(encoding="utf-8")
+
+        self.assertTrue(report.ok)
+        self.assertFalse(report.changed)
+
+        self.assertIn("size=1", patched)
+        self.assertIn("1\\arguments=", patched.splitlines())
+        self.assertNotIn("\\title=Nemesis", patched)
+        self.assertNotIn("Pandora Output", patched)
+
+    def test_existing_nemesis_auto_detect_skips_pandora_auto_add(self) -> None:
+        ini_text = (
+            "[customExecutables]\r\n"
+            "size=1\r\n"
+            "1\\arguments=\r\n"
+            "1\\binary=G:/Pack/mods/Nemesis/Nemesis Unlimited Behavior Engine.exe\r\n"
+            "1\\hide=false\r\n"
+            "1\\ownicon=false\r\n"
+            "1\\steamAppID=\r\n"
+            "1\\title=Nemesis\r\n"
+            "1\\toolbar=true\r\n"
+            "1\\workingDirectory=G:/Pack/mods/Nemesis\r\n"
+        )
+
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = tmp / "Pack"
+            pandora = instance / "mods" / "Pandora Behaviour Engine"
+            pandora.mkdir(parents=True)
+            (pandora / "Pandora Behaviour Engine+.exe").write_bytes(b"")
+
+            ini_path = instance / "ModOrganizer.ini"
+            ini_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_bytes(ini_path, ini_text)
+
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance,
+                game_path=None,
+                tool_root=None,
+                options=PatchOptions(auto_add_missing=True, backup=False),
+            )
+            patched = ini_path.read_text(encoding="utf-8")
+
+        self.assertTrue(report.ok)
+        self.assertFalse(report.changed)
+
+        self.assertIn("size=1", patched)
+        self.assertIn("1\\title=Nemesis", patched)
+        self.assertNotIn("\\title=Pandora Behaviour Engine+", patched)
+
     def test_arg_presets_can_skip_existing_pandora_arguments(self) -> None:
         ini_text = (
             "[General]\r\n"

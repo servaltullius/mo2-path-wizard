@@ -40,6 +40,9 @@ class TestGuiPreviewOutput(unittest.TestCase):
 
         self.assertIn("[현재 감지된 경로]", output)
         self.assertIn("INI: G:/TAKEALOOK/ModOrganizer.ini", output)
+        self.assertIn("[Pandora/Nemesis 자동 판단]", output)
+        self.assertIn("Pandora 등록됨", output)
+        self.assertIn("Nemesis 자동 추가", output)
         self.assertIn("[현재 등록된 실행 파일]", output)
         self.assertIn("1. SKSE", output)
         self.assertIn("G:/TAKEALOOK/mods/SKSE/skse64_loader.exe", output)

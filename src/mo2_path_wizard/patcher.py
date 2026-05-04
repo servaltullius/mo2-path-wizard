@@ -16,6 +16,7 @@ from .presets import ArgContext, arg_preset_for_title
 class PatchOptions:
     apply_arg_presets: bool = False
     auto_add_missing: bool = False
+    behavior_engine_auto_detect: bool = True
     skip_auto_add_titles: tuple[str, ...] = ()
     skip_arg_preset_titles: tuple[str, ...] = ()
     edition: str = "sse"
@@ -45,6 +46,8 @@ class CustomExecutableEntry:
 
 _SECTION_RE = re.compile(r"^\[(?P<name>[^\]]+)\]\s*$")
 _CUSTOM_ENTRY_RE = re.compile(r"^(?P<idx>\d+)\\(?P<key>[^=]+)=(?P<value>.*)$")
+_PANDORA_CANONICAL_TITLE = "pandora behaviour engine+"
+_NEMESIS_CANONICAL_TITLE = "nemesis"
 
 
 def _read_text_preserve(path: Path) -> tuple[str, str]:
@@ -440,6 +443,37 @@ def _parse_int(value: str) -> int | None:
         return None
 
 
+def _is_pandora_value(value: str) -> bool:
+    return "pandora" in value.strip().lower()
+
+
+def _is_nemesis_value(value: str) -> bool:
+    return "nemesis" in value.strip().lower()
+
+
+def _entry_has_pandora(kv: dict[str, tuple[str, int]]) -> bool:
+    title = kv.get("title", ("", -1))[0]
+    binary = kv.get("binary", ("", -1))[0]
+    return _is_pandora_value(title) or _is_pandora_value(binary)
+
+
+def _entry_has_nemesis(kv: dict[str, tuple[str, int]]) -> bool:
+    title = kv.get("title", ("", -1))[0]
+    binary = kv.get("binary", ("", -1))[0]
+    return _is_nemesis_value(title) or _is_nemesis_value(binary)
+
+
+def _title_is_skipped(title: str, skip_titles: set[str]) -> bool:
+    normalized = title.strip().lower()
+    if normalized in skip_titles:
+        return True
+    if _PANDORA_CANONICAL_TITLE in skip_titles and _is_pandora_value(normalized):
+        return True
+    if _NEMESIS_CANONICAL_TITLE in skip_titles and _is_nemesis_value(normalized):
+        return True
+    return False
+
+
 def inspect_custom_executables(ini_path: Path) -> tuple[CustomExecutableEntry, ...]:
     """Return current [customExecutables] entries without looking at recentDirectories."""
     if not ini_path.exists():
@@ -677,6 +711,17 @@ def patch_modorganizer_ini(
             language=options.language,
         )
 
+        existing_has_pandora = any(_entry_has_pandora(kv) for kv in entries.values())
+        existing_has_nemesis = any(_entry_has_nemesis(kv) for kv in entries.values())
+        effective_skip_auto_add_titles = {title.strip().lower() for title in options.skip_auto_add_titles}
+        effective_skip_arg_preset_titles = {title.strip().lower() for title in options.skip_arg_preset_titles}
+        if options.behavior_engine_auto_detect:
+            if existing_has_pandora:
+                effective_skip_auto_add_titles.add(_NEMESIS_CANONICAL_TITLE)
+                effective_skip_arg_preset_titles.add(_PANDORA_CANONICAL_TITLE)
+            if existing_has_nemesis:
+                effective_skip_auto_add_titles.add(_PANDORA_CANONICAL_TITLE)
+
         # 누락된 executables 자동 추가
         if options.auto_add_missing:
             size_line_idx, size_val = _custom_size_line(lines, section_ranges, newline)
@@ -686,11 +731,10 @@ def patch_modorganizer_ini(
             used_indices = {int(k) for k in entries.keys() if k.isdigit()}
             existing_titles = {kv.get("title", ("", -1))[0].strip().lower() for kv in entries.values()}
             existing_basenames = _existing_executable_basenames(entries)
-            skip_auto_add_titles = {title.strip().lower() for title in options.skip_auto_add_titles}
 
             insert_at = e
             for spec in DEFAULT_EXECUTABLE_SPECS:
-                if spec.title.strip().lower() in skip_auto_add_titles:
+                if _title_is_skipped(spec.title, effective_skip_auto_add_titles):
                     continue
                 exe_lower = {n.lower() for n in spec.exe_names}
                 if existing_basenames.intersection(exe_lower):
@@ -794,7 +838,6 @@ def patch_modorganizer_ini(
             if "arguments" in kv:
                 old_args, args_idx = kv["arguments"]
                 new_args = old_args
-                skip_arg_preset_titles = {title.strip().lower() for title in options.skip_arg_preset_titles}
 
                 override_tmpl = options.args_overrides.get(title_key)
                 if override_tmpl:
@@ -803,7 +846,7 @@ def patch_modorganizer_ini(
                         new_args = override
                     else:
                         new_args = _apply_replacements(new_args, replacements)
-                elif options.apply_arg_presets and title_key not in skip_arg_preset_titles:
+                elif options.apply_arg_presets and not _title_is_skipped(title, effective_skip_arg_preset_titles):
                     preset = arg_preset_for_title(title, arg_ctx)
                     if preset is not None:
                         new_args = preset
