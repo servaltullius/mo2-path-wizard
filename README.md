@@ -21,6 +21,9 @@ python -m mo2_path_wizard --root "D:\\Modlist"
 python -m mo2_path_wizard.gui
 ```
 
+GUI에서는 모드팩 폴더를 고른 뒤 `자동 감지 + 미리보기`를 바로 누르면 됩니다.
+왼쪽의 `경로만 자동 감지`는 고급 경로 칸을 먼저 채워 보고 싶을 때 쓰는 보조 버튼입니다.
+
 ### 누락된 Executables 자동 추가
 
 `[customExecutables]`에 없으면 아래 툴들을 **찾아서 자동으로 추가**합니다(경로는 `--tool-root`/모드팩 `mods/`에서 탐지).

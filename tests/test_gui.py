@@ -1,11 +1,22 @@
 import unittest
 from pathlib import Path
 
-from mo2_path_wizard.gui import _PreviewContext, _format_run_output
+from mo2_path_wizard.gui import _App, _PreviewContext, _format_run_output
 from mo2_path_wizard.patcher import CustomExecutableEntry, PatchReport
 
 
 class TestGuiPreviewOutput(unittest.TestCase):
+    def test_primary_flow_labels_explain_preview_runs_auto_detect(self) -> None:
+        app = _App()
+        try:
+            app.withdraw()
+
+            self.assertEqual("경로만 자동 감지", app.btn_auto_detect.cget("text"))
+            self.assertEqual("자동 감지 + 미리보기", app.btn_preview.cget("text"))
+            self.assertIn("바로 미리보기를 누르면 자동 감지", app.modpack_hint.cget("text"))
+        finally:
+            app.destroy()
+
     def test_preview_output_includes_current_executables_before_diff(self) -> None:
         context = _PreviewContext(
             ini_path=Path("G:/TAKEALOOK/ModOrganizer.ini"),

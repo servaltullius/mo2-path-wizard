@@ -286,11 +286,14 @@ class _App(tk.Tk):
         modpack_footer = ttk.Frame(modpack, style="Card.TFrame")
         modpack_footer.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         modpack_footer.columnconfigure(0, weight=1)
-        ttk.Label(modpack_footer, text="루트 폴더 선택 후 자동 감지를 실행하세요.", style="Hint.TLabel").grid(
-            row=0, column=0, sticky="w"
+        self.modpack_hint = ttk.Label(
+            modpack_footer,
+            text="폴더 선택 후 바로 미리보기를 누르면 자동 감지까지 함께 실행됩니다.",
+            style="Hint.TLabel",
         )
+        self.modpack_hint.grid(row=0, column=0, sticky="w")
         self.btn_auto_detect = ttk.Button(
-            modpack_footer, text="자동 감지", style="Secondary.TButton", command=self._auto_detect
+            modpack_footer, text="경로만 자동 감지", style="Secondary.TButton", command=self._auto_detect
         )
         self.btn_auto_detect.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
@@ -361,7 +364,7 @@ class _App(tk.Tk):
         actions.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
-        self.btn_preview = ttk.Button(actions, text="미리보기", style="Secondary.TButton", command=self._preview)
+        self.btn_preview = ttk.Button(actions, text="자동 감지 + 미리보기", style="Secondary.TButton", command=self._preview)
         self.btn_preview.grid(row=0, column=0, sticky="ew")
         self.btn_apply = ttk.Button(actions, text="적용", style="Primary.TButton", command=self._apply)
         self.btn_apply.grid(row=0, column=1, sticky="ew", padx=(10, 0))
@@ -622,7 +625,7 @@ class _App(tk.Tk):
         if self._busy:
             return
 
-        self._set_busy(True, "미리보기 생성 중..." if dry_run else "적용 중...")
+        self._set_busy(True, "자동 감지 + 미리보기 중..." if dry_run else "자동 감지 + 적용 중...")
 
         def worker() -> None:
             try:
