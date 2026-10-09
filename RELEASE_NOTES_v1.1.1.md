@@ -17,3 +17,21 @@ GUI에서 `고급 경로 옵션 표시`를 켜거나 창이 작을 때 왼쪽 �
 - Windows(4K, 배율 175%)에서 기본/최소 창 크기와 고급 경로 펼침/접힘 상태를 실제로 띄워 화면을 확인했습니다.
 - 작은 창에서 고급 경로를 펼쳐도 실행 버튼이 창 안에 보이는지 확인하는 GUI 회귀 테스트를 추가했습니다.
 - Windows CI에서 전체 테스트 `84`개 통과 후 빌드했습니다.
+- 빌드된 GUI 실행 파일을 Windows에서 띄워 기본/최소 창 크기 화면을 확인했습니다.
+
+## 권장 다운로드
+
+- `mo2-path-wizard-gui.zip`
+
+## 추가 다운로드
+
+- `mo2-path-wizard-gui.exe`
+- `mo2-path-wizard.exe`
+
+## SHA256
+
+```text
+06EC2C7E3773AC0F78BA68166BCF6CDC870F0F3FB7D27E32260AE27A990B941C  mo2-path-wizard-gui.zip
+813473B7E1AC7A19D794D32E555FC70B1981DC7D5D4F62C7BE16FE09C87F53CF  mo2-path-wizard-gui.exe
+7DF946B23E62B21DA474983882FF22B0BB1AD4DF28BD704854CEAE8F9CAE5200  mo2-path-wizard.exe
+```
