@@ -1,5 +1,43 @@
 # 변경 내역
 
+## v1.1.0 - 2026-10-09
+
+### 요약
+
+경로 패처를 단계별 구조로 다시 쓰고, 옛 위치 자동 추론·툴 설정 파일 갱신·MO2 실행 중 감지를 더한 전면 개선 버전입니다.
+
+### 추가
+
+- 옛 위치 자동 추론: INI와 툴 설정 파일에 남은 옛 경로의 뒷부분이 새 모드팩 아래에 실제로 있는지로 '어디서 어디로 옮겼는지'를 알아냅니다.
+- 툴 설정 파일 갱신(기본 켜짐): DynDOLOD 프리셋, BodySlide `Config.xml`, Synthesis(`PipelineSettings.json`, 패처별 `settings.json`), BethINI, PGPatcher, SSE-AT, zEdit, CAO, Pandora, ESLifier. 파일마다 `.bak` 백업을 만듭니다. `--no-external-configs`로 끌 수 있습니다.
+- MO2 실행 중 감지: 같은 모드팩의 MO2가 켜져 있으면 적용하지 않습니다(`--force`로 무시). GUI 미리보기에 `[MO2 실행 상태]`를 표시합니다.
+- `[Settings]`의 `download_directory` 등 디렉터리 경로와 `[Plugins]`에 저장된 경로를 갱신합니다.
+- 적용 후에도 실행 파일이 없는 실행 항목을 알려 줍니다.
+- 누락 실행 파일 자동 추가 대상: BodySlide/Outfit Studio, LOOT, BethINI, zEdit, SSE-AT, DIP, CAO, Explore Virtual Folder, `SSEEdit64.exe`/`xEdit*.exe`, `ParallaxGen.exe`.
+- 게임 에디션 자동 판단(`--edition auto`, 기본값): INI의 `gameName`으로 SE/VR/LE를 정합니다.
+
+### 수정
+
+- `base_directory`가 없는 포터블 모드팩에서 일부 경로(SKSE, Explorer++, recentDirectories 등)가 옛 위치에 남던 문제
+- 모드팩을 복사한 뒤 복사본의 INI를 고칠 때 옛 폴더를 계속 가리키던 문제
+- 전역(AppData) 인스턴스에서 `base_directory`가 AppData 폴더로 바뀌던 문제 — 이제 인스턴스 폴더를 지정하라고 알려 줍니다.
+- 이름이 같은 `Tool`/`TOOLS` 폴더가 함께 있을 때 옛 Tools 폴더와 이름이 같은 쪽을 고릅니다. mods 안의 `tools`(예: FNIS)를 Tools 폴더로 오인하지 않습니다.
+- Windows에서 `Stock Game` 폴더 이름의 대소문자 변형 때문에 게임 루트 자동 감지가 실패하던 문제
+- 잘못된 게임 경로를 주면 인스턴스 상위 폴더 전체를 뒤져 다른 게임 설치를 고르던 문제 — 이제 경고만 합니다.
+- UTF-8 BOM이 있는 INI의 첫 섹션을 읽지 못하던 문제
+- 정션/심볼릭 링크 폴더 때문에 자동 감지가 멈추던 문제
+- 실제로 바꾸지 않은 `base_directory`/`gamePath`도 요약에 표시되던 문제
+
+### 구조
+
+- `paths`(경로 치환), `relocate`(이동 추론), `external`(툴 설정), `mo2proc`(MO2 감지), `qtini`(Qt INI 값) 모듈로 나눴습니다.
+- `patch_modorganizer_ini`를 단계별 함수로 나누고, 결과(`PatchReport`)에 이동 내역·외부 설정 변경·실행 파일 없음 항목을 담습니다.
+
+### 검증
+
+- 테스트 `46`개 → `74`개(이동 추론, 외부 설정, MO2 감지, 새 툴 탐지, GUI 출력 포함).
+- 실제 모드팩 INI·툴 설정 파일 복사본으로 이동 시뮬레이션을 했습니다. 옛 경로가 남지 않고, 바뀐 줄 외에는 바이트 단위로 같으며, 두 번째 실행은 변경 없음입니다.
+
 ## v1.0.8 - 2026-10-09
 
 ### 요약
