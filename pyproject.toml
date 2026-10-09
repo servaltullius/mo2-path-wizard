@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mo2-path-wizard"
-version = "1.0.6"
+dynamic = ["version"]
 description = "MO2(Mod Organizer 2) 경로/실행파일(Executables) 자동 세팅 패처"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,9 @@ mo2-path-wizard-gui = "mo2_path_wizard.gui:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
+
+[tool.setuptools.dynamic]
+version = { attr = "mo2_path_wizard.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
