@@ -8,13 +8,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import qtini
 from .executables import DEFAULT_EXECUTABLE_SPECS, locate_executable
-from .presets import ArgContext, arg_preset_for_title
+from .presets import ArgContext, arg_preset_for
 
 
 @dataclass(frozen=True)
 class PatchOptions:
     apply_arg_presets: bool = False
+    # False면 arguments가 이미 있는 항목은 프리셋으로 덮어쓰지 않고 경로만 갱신한다.
+    overwrite_existing_args: bool = False
     auto_add_missing: bool = False
     behavior_engine_auto_detect: bool = True
     skip_auto_add_titles: tuple[str, ...] = ()
@@ -86,17 +89,11 @@ def _to_posix_path(path: Path) -> str:
 
 
 def _to_bytearray_path(path: Path) -> str:
-    win = str(path).replace("/", "\\")
-    win_escaped = win.replace("\\", "\\\\")
-    return f"@ByteArray({win_escaped})"
+    return qtini.encode_path_bytearray(str(path))
 
 
 def _parse_bytearray_path(value: str) -> str | None:
-    v = value.strip()
-    if not (v.startswith("@ByteArray(") and v.endswith(")")):
-        return None
-    inner = v[len("@ByteArray(") : -1]
-    return inner.replace("\\\\", "\\")
+    return qtini.decode_path_bytearray(value)
 
 
 def _escape_qsettings(value: str) -> str:
@@ -118,45 +115,67 @@ def _build_replacements(old_path: str, new_path: str) -> list[tuple[str, str]]:
 
 
 _PATH_REPLACEMENT_BOUNDARY_CHARS = frozenset('/\\"\'()[]{}<>,;')
+# 공백 뒤가 이런 형태면 경로가 끝난 것으로 본다(다음 인자 시작). 그 외 공백은 폴더 이름의 일부일 수 있다
+# (예: "D:\\TAKEALOOK - Outputs"가 "D:\\TAKEALOOK" 규칙에 걸리면 안 됨).
+_ARG_AFTER_SPACE_RE = re.compile(r'\s+(?:$|-{1,2}[A-Za-z]|\\?")')
 
 
 def _has_path_replacement_boundary(value: str, index: int) -> bool:
     if index >= len(value):
         return True
     ch = value[index]
-    return ch in _PATH_REPLACEMENT_BOUNDARY_CHARS or ch.isspace()
+    if ch in _PATH_REPLACEMENT_BOUNDARY_CHARS:
+        return True
+    if ch.isspace():
+        return _ARG_AFTER_SPACE_RE.match(value, index) is not None
+    return False
 
 
-def _replace_path_prefix(value: str, old: str, new: str) -> str:
-    if not old:
-        return value
-
-    parts: list[str] = []
-    start = 0
-    pos = value.find(old, start)
-    while pos != -1:
-        end = pos + len(old)
-        if _has_path_replacement_boundary(value, end):
-            parts.append(value[start:pos])
-            parts.append(new)
-        else:
-            parts.append(value[start:end])
-        start = end
-        pos = value.find(old, start)
-
-    if not parts:
-        return value
-
-    parts.append(value[start:])
-    return "".join(parts)
+def _has_path_start_boundary(value: str, index: int) -> bool:
+    if index == 0:
+        return True
+    prev = value[index - 1]
+    return not (prev.isalnum() or prev in "/\\._~")
 
 
 def _apply_replacements(value: str, replacements: list[tuple[str, str]]) -> str:
-    out = value
-    # 긴 것부터, 그리고 경로 경계에서만 치환(HGM -> HGM2 -> HGM22 방지)
-    for old, new in sorted(replacements, key=lambda x: len(x[0]), reverse=True):
-        out = _replace_path_prefix(out, old, new)
-    return out
+    """경로 경계에서만, 한 번에(single pass) 치환한다.
+
+    - 각 위치에서 가장 긴 규칙 하나만 적용하고 치환된 결과는 다시 검사하지 않는다
+      (새 경로가 옛 경로를 포함할 때 .../Pack/Pack/Pack 처럼 중복 치환되는 문제 방지).
+    - Windows 경로이므로 대소문자를 구분하지 않는다.
+    - 같은 옛 경로 규칙이 여러 개면 먼저 추가된 규칙이 우선한다.
+    """
+    rules: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for old, new in replacements:
+        key = old.lower()
+        if not old or key in seen:
+            continue
+        seen.add(key)
+        rules.append((old, key, new))
+    if not rules:
+        return value
+    rules.sort(key=lambda r: len(r[0]), reverse=True)
+
+    out: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        if _has_path_start_boundary(value, i):
+            for old, old_l, new in rules:
+                end = i + len(old)
+                if value[i:end].lower() == old_l and _has_path_replacement_boundary(value, end):
+                    out.append(new)
+                    i = end
+                    break
+            else:
+                out.append(value[i])
+                i += 1
+        else:
+            out.append(value[i])
+            i += 1
+    return "".join(out)
 
 
 def _common_prefix_path(paths: list[str]) -> str | None:
@@ -368,7 +387,7 @@ def _render_args_override(title: str, template: str, ctx: ArgContext, tool_root:
 
     try:
         rendered = template.format(**values)
-    except KeyError:
+    except (KeyError, IndexError, ValueError):
         return None
     return _escape_qsettings(rendered)
 
@@ -516,9 +535,12 @@ def inspect_custom_executables(ini_path: Path) -> tuple[CustomExecutableEntry, .
     return tuple(sorted(out, key=lambda entry: entry.index))
 
 
-def _custom_size_line(
-    lines: list[str], section_ranges: dict[str, tuple[int, int]], newline: str
-) -> tuple[int | None, int]:
+def _custom_size_line(lines: list[str], section_ranges: dict[str, tuple[int, int]]) -> tuple[int | None, int]:
+    """[customExecutables]의 size= 줄 위치와 값. 없으면 (None, 0).
+
+    여기서 줄을 삽입하면 이미 기록해 둔 기존 항목들의 줄 번호가 밀려 엉뚱한 줄을 덮어쓰게 되므로
+    삽입하지 않는다(필요하면 호출 측이 섹션 끝에 추가).
+    """
     if "customExecutables" not in section_ranges:
         return None, 0
     s, e = section_ranges["customExecutables"]
@@ -527,13 +549,7 @@ def _custom_size_line(
         if raw.startswith("size="):
             size = _parse_int(raw.split("=", 1)[1]) or 0
             return i, size
-    # missing size= -> insert after header
-    insert_at = s + 1
-    lines.insert(insert_at, f"size=0{newline}")
-    updated = _find_section_ranges(lines)
-    section_ranges.clear()
-    section_ranges.update(updated)
-    return insert_at, 0
+    return None, 0
 
 
 def _existing_executable_basenames(entries: dict[str, dict[str, tuple[str, int]]]) -> set[str]:
@@ -548,10 +564,20 @@ def _existing_executable_basenames(entries: dict[str, dict[str, tuple[str, int]]
 
 
 def _next_free_custom_index(used: set[int], size: int) -> tuple[int, int]:
+    """새 항목 번호와 갱신된 size. 이미 쓰는 번호(size보다 큰 번호 포함)는 절대 재사용하지 않는다."""
     for i in range(1, size + 1):
         if i not in used:
             return i, size
-    return size + 1, size + 1
+    idx = max([size, *used]) + 1
+    return idx, idx
+
+
+def _section_insert_point(lines: list[str], start: int, end: int) -> int:
+    """섹션 끝의 빈 줄 앞(마지막 내용 줄 바로 뒤) 위치."""
+    i = end
+    while i - 1 > start and not lines[i - 1].strip():
+        i -= 1
+    return i
 
 
 def patch_modorganizer_ini(
@@ -569,7 +595,8 @@ def patch_modorganizer_ini(
     lines = _split_lines_keepends(original_text)
     section_ranges = _find_section_ranges(lines)
 
-    old_base_dir, _ = _get_value_in_section(lines, section_ranges, "Settings", "base_directory")
+    old_base_raw, _ = _get_value_in_section(lines, section_ranges, "Settings", "base_directory")
+    old_base_dir = qtini.unescape_string(old_base_raw) if old_base_raw is not None else None
     old_game_raw, _ = _get_value_in_section(lines, section_ranges, "General", "gamePath")
 
     if instance_root is None:
@@ -673,7 +700,9 @@ def patch_modorganizer_ini(
             should_set_base_dir = instance_root != ini_path.parent
 
     if should_set_base_dir and old_base_dir != new_base_dir:
-        if _set_value_in_section(lines, section_ranges, "Settings", "base_directory", new_base_dir, newline):
+        if _set_value_in_section(
+            lines, section_ranges, "Settings", "base_directory", qtini.escape_string(new_base_dir), newline
+        ):
             changed = True
 
     # gamePath 적용(가능할 때)
@@ -724,15 +753,15 @@ def patch_modorganizer_ini(
 
         # 누락된 executables 자동 추가
         if options.auto_add_missing:
-            size_line_idx, size_val = _custom_size_line(lines, section_ranges, newline)
-            # ranges가 갱신되었을 수 있으니 다시 읽기
+            size_line_idx, size_val = _custom_size_line(lines, section_ranges)
             s, e = section_ranges["customExecutables"]
 
             used_indices = {int(k) for k in entries.keys() if k.isdigit()}
             existing_titles = {kv.get("title", ("", -1))[0].strip().lower() for kv in entries.values()}
             existing_basenames = _existing_executable_basenames(entries)
 
-            insert_at = e
+            # 새 줄은 기존 항목들 뒤(섹션 끝)에만 넣는다 -> 기존 항목의 줄 번호가 바뀌지 않는다.
+            insert_at = _section_insert_point(lines, s, e)
             for spec in DEFAULT_EXECUTABLE_SPECS:
                 if _title_is_skipped(spec.title, effective_skip_auto_add_titles):
                     continue
@@ -762,7 +791,7 @@ def patch_modorganizer_ini(
                     if override is not None:
                         args_val = override
                 else:
-                    preset = arg_preset_for_title(title, arg_ctx)
+                    preset = arg_preset_for(title, binary_path.name, arg_ctx)
                     if preset is not None:
                         args_val = preset
 
@@ -789,9 +818,12 @@ def patch_modorganizer_ini(
                 added_titles.append(title)
 
             # size 업데이트
-            if size_line_idx is not None:
-                eol = _line_eol(lines[size_line_idx]) or newline
-                lines[size_line_idx] = f"size={size_val}{eol}"
+            if added_titles:
+                if size_line_idx is not None:
+                    eol = _line_eol(lines[size_line_idx]) or newline
+                    lines[size_line_idx] = f"size={size_val}{eol}"
+                else:
+                    lines.insert(insert_at, f"size={size_val}{newline}")
 
             # 섹션 범위 갱신
             updated = _find_section_ranges(lines)
@@ -846,8 +878,12 @@ def patch_modorganizer_ini(
                         new_args = override
                     else:
                         new_args = _apply_replacements(new_args, replacements)
-                elif options.apply_arg_presets and not _title_is_skipped(title, effective_skip_arg_preset_titles):
-                    preset = arg_preset_for_title(title, arg_ctx)
+                elif (
+                    options.apply_arg_presets
+                    and (options.overwrite_existing_args or not old_args.strip())
+                    and not _title_is_skipped(title, effective_skip_arg_preset_titles)
+                ):
+                    preset = arg_preset_for(title, kv.get("binary", ("", -1))[0], arg_ctx)
                     if preset is not None:
                         new_args = preset
                     else:

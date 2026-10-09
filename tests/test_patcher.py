@@ -582,6 +582,7 @@ class TestPatcher(unittest.TestCase):
                 tool_root=None,
                 options=PatchOptions(
                     apply_arg_presets=True,
+                    overwrite_existing_args=True,
                     skip_arg_preset_titles=("Pandora Behaviour Engine+",),
                     backup=False,
                 ),
@@ -671,6 +672,217 @@ class TestPatcher(unittest.TestCase):
             patched = ini_path.read_text(encoding="utf-8")
             self.assertIn("\\title=Edit", patched)
             self.assertIn(str(edit_dir / "SSEEdit.exe").replace("\\", "/"), patched)
+
+
+
+def _custom_entries(text: str) -> dict[int, dict[str, str]]:
+    entries: dict[int, dict[str, str]] = {}
+    in_section = False
+    for line in text.splitlines():
+        if line.startswith("["):
+            in_section = line.strip() == "[customExecutables]"
+            continue
+        if not in_section or "\\" not in line.split("=", 1)[0]:
+            continue
+        key, value = line.split("=", 1)
+        idx, name = key.split("\\", 1)
+        entries.setdefault(int(idx), {})[name] = value
+    return entries
+
+
+class TestPatcherRegressions(unittest.TestCase):
+    def _make_synthesis(self, tmp: Path) -> Path:
+        tool = tmp / "Instance" / "tools" / "Synthesis"
+        tool.mkdir(parents=True)
+        (tool / "Synthesis.exe").write_bytes(b"")
+        return tmp / "Instance"
+
+    def _run(self, ini_path: Path, instance: Path, **opts) -> str:
+        report = patch_modorganizer_ini(
+            ini_path=ini_path,
+            instance_root=instance,
+            game_path=None,
+            tool_root=None,
+            options=PatchOptions(backup=False, **opts),
+        )
+        self.assertTrue(report.ok)
+        return ini_path.read_text(encoding="utf-8")
+
+    def test_auto_add_without_size_line_keeps_existing_entries(self) -> None:
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = self._make_synthesis(tmp)
+            ini_path = instance / "ModOrganizer.ini"
+            _write_bytes(
+                ini_path,
+                "[customExecutables]\r\n"
+                "1\\arguments=-foo\r\n"
+                "1\\binary=C:/Keep/One.exe\r\n"
+                "1\\title=One\r\n"
+                "2\\arguments=-bar\r\n"
+                "2\\binary=C:/Keep/Two.exe\r\n"
+                "2\\title=Two\r\n"
+                "\r\n"
+                "[Settings]\r\n"
+                "language=ko\r\n",
+            )
+
+            patched = self._run(ini_path, instance, auto_add_missing=True)
+
+            entries = _custom_entries(patched)
+            self.assertEqual({"arguments": "-foo", "binary": "C:/Keep/One.exe", "title": "One"}, entries[1])
+            self.assertEqual({"arguments": "-bar", "binary": "C:/Keep/Two.exe", "title": "Two"}, entries[2])
+            self.assertEqual("Synthesis", entries[3]["title"])
+            self.assertIn("size=3", patched.splitlines())
+            self.assertIn("[Settings]\nlanguage=ko", patched)
+
+    def test_auto_add_never_reuses_index_beyond_size(self) -> None:
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = self._make_synthesis(tmp)
+            ini_path = instance / "ModOrganizer.ini"
+            _write_bytes(
+                ini_path,
+                "[customExecutables]\r\n"
+                "size=1\r\n"
+                "1\\binary=C:/Keep/One.exe\r\n"
+                "1\\title=One\r\n"
+                "2\\binary=C:/Keep/Two.exe\r\n"
+                "2\\title=Two\r\n",
+            )
+
+            patched = self._run(ini_path, instance, auto_add_missing=True)
+
+            entries = _custom_entries(patched)
+            self.assertEqual("Two", entries[2]["title"])
+            self.assertEqual("C:/Keep/Two.exe", entries[2]["binary"])
+            self.assertEqual("Synthesis", entries[3]["title"])
+            self.assertIn("size=3", patched.splitlines())
+
+    def test_presets_do_not_touch_game_exes_or_existing_args(self) -> None:
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = tmp / "Pack"
+            game = instance / "Stock Game"
+            (game / "Data").mkdir(parents=True)
+            (game / "SkyrimSE.exe").write_bytes(b"")
+            ini_path = instance / "ModOrganizer.ini"
+            _write_bytes(
+                ini_path,
+                "[customExecutables]\r\n"
+                "size=4\r\n"
+                "1\\arguments=\r\n"
+                f"1\\binary={_posix(game)}/SkyrimSE.exe\r\n"
+                "1\\title=Skyrim Special Edition\r\n"
+                "2\\arguments=\r\n"
+                f"2\\binary={_posix(instance)}/TOOLS/zEdit/zEdit.exe\r\n"
+                "2\\title=zEdit\r\n"
+                "3\\arguments=-IKnowWhatImDoing -PseudoESL\r\n"
+                f"3\\binary={_posix(instance)}/TOOLS/SSEEdit/SSEEdit64.exe\r\n"
+                "3\\title=SSEEdit (64bit)\r\n"
+                "4\\arguments=\r\n"
+                f"4\\binary={_posix(instance)}/TOOLS/SSEEdit/SSEEdit.exe\r\n"
+                "4\\title=SSEEdit\r\n",
+            )
+
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance,
+                game_path=game,
+                tool_root=None,
+                options=PatchOptions(apply_arg_presets=True, backup=False),
+            )
+            self.assertTrue(report.ok)
+            entries = _custom_entries(ini_path.read_text(encoding="utf-8"))
+
+            self.assertEqual("", entries[1]["arguments"])
+            self.assertEqual("", entries[2]["arguments"])
+            self.assertEqual("-IKnowWhatImDoing -PseudoESL", entries[3]["arguments"])
+            self.assertIn(_escaped_win(game / "Data"), entries[4]["arguments"])
+
+    def test_overwrite_existing_args_replaces_xedit_args_only(self) -> None:
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = tmp / "Pack"
+            game = instance / "Stock Game"
+            (game / "Data").mkdir(parents=True)
+            (game / "SkyrimSE.exe").write_bytes(b"")
+            ini_path = instance / "ModOrganizer.ini"
+            _write_bytes(
+                ini_path,
+                "[customExecutables]\r\n"
+                "size=2\r\n"
+                "1\\arguments=-custom\r\n"
+                f"1\\binary={_posix(game)}/SkyrimSE.exe\r\n"
+                "1\\title=Skyrim Special Edition\r\n"
+                "2\\arguments=-old\r\n"
+                f"2\\binary={_posix(instance)}/TOOLS/SSEEdit/SSEEdit.exe\r\n"
+                "2\\title=SSEEdit\r\n",
+            )
+
+            patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance,
+                game_path=game,
+                tool_root=None,
+                options=PatchOptions(apply_arg_presets=True, overwrite_existing_args=True, backup=False),
+            )
+            entries = _custom_entries(ini_path.read_text(encoding="utf-8"))
+
+            self.assertEqual("-custom", entries[1]["arguments"])
+            self.assertIn("-l:korean", entries[2]["arguments"])
+
+    def test_korean_game_path_is_written_in_qt_bytearray_form(self) -> None:
+        with TemporaryDirectory() as td:
+            tmp = Path(td)
+            instance = tmp / "모드팩"
+            game = instance / "Stock Game"
+            (game / "Data").mkdir(parents=True)
+            (game / "SkyrimSE.exe").write_bytes(b"")
+            ini_path = instance / "ModOrganizer.ini"
+            _write_bytes(ini_path, "[General]\r\ngamePath=@ByteArray(D:\\\\Old\\\\Stock Game)\r\n")
+
+            patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance,
+                game_path=game,
+                tool_root=None,
+                options=PatchOptions(backup=False),
+            )
+            patched = ini_path.read_text(encoding="utf-8")
+
+            line = next(l for l in patched.splitlines() if l.startswith("gamePath="))
+            self.assertNotIn("모드팩", line)
+            self.assertIn("\\xeb\\xaa\\xa8", line)
+            from mo2_path_wizard import qtini
+
+            self.assertEqual(str(game).replace("/", "\\"), qtini.decode_path_bytearray(line.split("=", 1)[1]))
+
+    def test_sibling_folder_with_space_dash_is_not_rewritten(self) -> None:
+        rules = _build_replacements("D:/TAKEALOOK", "G:/TAKEALOOK")
+        value = '-o:\\"D:\\\\TAKEALOOK - Outputs\\\\lodgen output\\" -d:\\"D:\\\\TAKEALOOK\\\\Stock Game\\\\Data\\"'
+        out = _apply_replacements(value, rules)
+        self.assertIn("D:\\\\TAKEALOOK - Outputs", out)
+        self.assertIn("G:\\\\TAKEALOOK\\\\Stock Game", out)
+
+    def test_space_before_next_flag_still_ends_path(self) -> None:
+        rules = _build_replacements("D:/Pack", "G:/Pack")
+        self.assertEqual("-o:G:/Pack -sse", _apply_replacements("-o:D:/Pack -sse", rules))
+        self.assertEqual("G:/Pack", _apply_replacements("D:/Pack", rules))
+
+    def test_replacement_into_nested_new_root_is_not_chained(self) -> None:
+        rules = _build_replacements("D:/X", "D:/X/Lists/Pack") + _build_replacements("D:/X", "D:/X/Lists/Pack")
+        out = _apply_replacements("D:/X/Stock Game/skse64_loader.exe", rules)
+        self.assertEqual("D:/X/Lists/Pack/Stock Game/skse64_loader.exe", out)
+
+    def test_replacement_is_case_insensitive(self) -> None:
+        rules = _build_replacements("D:/Old", "E:/New")
+        self.assertEqual("E:/New/mods/a.exe", _apply_replacements("d:/old/mods/a.exe", rules))
+        self.assertEqual("E:\\New\\x", _apply_replacements("D:\\OLD\\x", rules))
+
+    def test_replacement_requires_start_boundary(self) -> None:
+        rules = _build_replacements("tmp/pack/tools", "/tmp/new/tools")
+        self.assertEqual("/tmp/pack/tools/a.exe", _apply_replacements("/tmp/pack/tools/a.exe", rules))
 
 
 if __name__ == "__main__":

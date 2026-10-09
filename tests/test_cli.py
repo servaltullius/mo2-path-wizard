@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -88,6 +90,18 @@ class TestCli(unittest.TestCase):
         output = out.getvalue()
         self.assertNotIn("title=Nemesis", output)
         self.assertNotIn("auto-add: Nemesis", output)
+
+
+    def test_cli_entry_does_not_import_gui(self) -> None:
+        # tkinter가 없는 환경에서도 `python -m mo2_path_wizard --root ...`가 동작해야 한다.
+        import mo2_path_wizard
+
+        src = str(Path(mo2_path_wizard.__file__).parent.parent)
+        code = "import sys, mo2_path_wizard.__main__; print('mo2_path_wizard.gui' in sys.modules)"
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env={"PYTHONPATH": src}, check=True
+        )
+        self.assertEqual("False", out.stdout.strip())
 
 
 if __name__ == "__main__":

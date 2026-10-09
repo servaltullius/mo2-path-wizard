@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import qtini
+
 
 @dataclass(frozen=True)
 class DiscoveredPaths:
@@ -29,11 +31,7 @@ def _normalize_slashes(value: str) -> str:
 
 
 def _parse_bytearray_path(value: str) -> str | None:
-    v = value.strip()
-    if not (v.startswith("@ByteArray(") and v.endswith(")")):
-        return None
-    inner = v[len("@ByteArray(") : -1]
-    return inner.replace("\\\\", "\\")
+    return qtini.decode_path_bytearray(value)
 
 
 def _real_case_path(path: Path) -> Path:
@@ -92,7 +90,7 @@ def _parse_ini_hints(ini_path: Path) -> tuple[str | None, str | None, list[str]]
             current_section = m.group("name")
             continue
         if current_section == "Settings" and line.startswith("base_directory="):
-            base_directory = line.split("=", 1)[1].strip()
+            base_directory = qtini.unescape_string(line.split("=", 1)[1].strip())
         elif current_section == "General" and line.startswith("gamePath="):
             game_path_raw = line.split("=", 1)[1].strip()
         elif current_section == "customExecutables":

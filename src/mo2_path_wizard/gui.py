@@ -147,6 +147,7 @@ class _App(tk.Tk):
         self.tool_root = tk.StringVar()
 
         self.apply_arg_presets = tk.BooleanVar(value=False)
+        self.overwrite_existing_args = tk.BooleanVar(value=False)
         self.auto_add_missing = tk.BooleanVar(value=True)
         self.behavior_engine_auto_detect = tk.BooleanVar(value=True)
         self.skip_pandora = tk.BooleanVar(value=False)
@@ -332,6 +333,12 @@ class _App(tk.Tk):
             variable=self.skip_nemesis,
             style="Card.TCheckbutton",
         ).grid(row=2, column=1, sticky="w", pady=3, padx=(12, 0))
+        ttk.Checkbutton(
+            option_grid,
+            text="기존 arguments도 프리셋으로 덮어쓰기",
+            variable=self.overwrite_existing_args,
+            style="Card.TCheckbutton",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=3)
 
         select_row = ttk.Frame(options, style="Card.TFrame")
         select_row.grid(row=1, column=0, sticky="ew", pady=(12, 0))
@@ -465,12 +472,14 @@ class _App(tk.Tk):
             return
 
         self._set_busy(True, "자동 감지 중...")
+        edition = self.edition.get().strip() or "sse"
 
         def worker() -> None:
             try:
-                discovered = discover_from_root(root, edition=self.edition.get().strip() or "sse")
+                discovered = discover_from_root(root, edition=edition)
             except Exception as e:
-                self.after(0, lambda: self._on_detect_error(e))
+                # except 블록이 끝나면 e가 지워지므로 기본 인자로 묶어 둔다.
+                self.after(0, lambda exc=e: self._on_detect_error(exc))
                 return
             self.after(0, lambda: self._on_detect_done(discovered))
 
@@ -548,58 +557,85 @@ class _App(tk.Tk):
         except Exception:
             self.status.set("복사 실패")
 
-    def _patch_job(self, dry_run: bool) -> tuple[object | None, _PreviewContext, PatchReport]:
-        root = Path(self.pack_root.get()).expanduser() if self.pack_root.get().strip() else None
+    def _snapshot_inputs(self, dry_run: bool) -> dict:
+        """Tk 변수는 메인 스레드에서만 읽는다. 작업 스레드에는 이 스냅샷만 넘긴다."""
+
+        def opt_path(var: tk.StringVar) -> Path | None:
+            v = var.get().strip()
+            return Path(v).expanduser() if v else None
+
+        return {
+            "dry_run": dry_run,
+            "pack_root": opt_path(self.pack_root),
+            "ini": opt_path(self.ini_path),
+            "instance_root": opt_path(self.instance_root),
+            "game_path": opt_path(self.game_path),
+            "tool_root": opt_path(self.tool_root),
+            "args_json": opt_path(self.args_json),
+            "edition": self.edition.get().strip() or "sse",
+            "language": self.lang.get().strip() or "korean",
+            "apply_arg_presets": bool(self.apply_arg_presets.get()),
+            "overwrite_existing_args": bool(self.overwrite_existing_args.get()),
+            "auto_add_missing": bool(self.auto_add_missing.get()),
+            "behavior_engine_auto_detect": bool(self.behavior_engine_auto_detect.get()),
+            "skip_pandora": bool(self.skip_pandora.get()),
+            "skip_nemesis": bool(self.skip_nemesis.get()),
+            "backup": not bool(self.no_backup.get()),
+        }
+
+    @staticmethod
+    def _patch_job(inputs: dict) -> tuple[object | None, _PreviewContext, PatchReport]:
+        root = inputs["pack_root"]
         discovered = None
         if root and root.is_dir():
-            discovered = discover_from_root(root, edition=self.edition.get().strip() or "sse")
+            discovered = discover_from_root(root, edition=inputs["edition"])
 
-        ini = Path(self.ini_path.get()).expanduser() if self.ini_path.get().strip() else None
+        ini = inputs["ini"]
         if ini is None and discovered and discovered.ini_path:
             ini = discovered.ini_path
-            self.ini_path.set(str(ini))
         if ini is None or not ini.exists():
             raise FileNotFoundError("ModOrganizer.ini를 찾지 못했습니다. (모드팩 폴더 또는 ini를 선택해 주세요)")
 
-        instance_root = Path(self.instance_root.get()).expanduser() if self.instance_root.get().strip() else None
+        instance_root = inputs["instance_root"]
         if instance_root is None and discovered and discovered.instance_root:
             instance_root = discovered.instance_root
-            self.instance_root.set(str(instance_root))
 
-        game_path = Path(self.game_path.get()).expanduser() if self.game_path.get().strip() else None
+        game_path = inputs["game_path"]
         if game_path is None and discovered and discovered.game_path:
             game_path = discovered.game_path
-            self.game_path.set(str(game_path))
 
-        tool_root = Path(self.tool_root.get()).expanduser() if self.tool_root.get().strip() else None
+        tool_root = inputs["tool_root"]
         if tool_root is None and discovered and discovered.tool_root:
             tool_root = discovered.tool_root
-            self.tool_root.set(str(tool_root))
 
         args_overrides: dict[str, str] = {}
-        if self.args_json.get().strip():
-            raw = json.loads(Path(self.args_json.get()).read_text(encoding="utf-8"))
+        if inputs["args_json"]:
+            try:
+                raw = json.loads(inputs["args_json"].read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                raise ValueError(f"arguments JSON을 읽지 못했습니다: {e}") from e
             if isinstance(raw, dict):
                 for k, v in raw.items():
                     if isinstance(k, str) and isinstance(v, str):
                         args_overrides[k.strip().lower()] = v
 
         skip_auto_add_titles: list[str] = []
-        if self.skip_pandora.get():
+        if inputs["skip_pandora"]:
             skip_auto_add_titles.append("Pandora Behaviour Engine+")
-        if self.skip_nemesis.get():
+        if inputs["skip_nemesis"]:
             skip_auto_add_titles.append("Nemesis")
 
         options = PatchOptions(
-            apply_arg_presets=bool(self.apply_arg_presets.get()),
-            auto_add_missing=bool(self.auto_add_missing.get()),
-            behavior_engine_auto_detect=bool(self.behavior_engine_auto_detect.get()),
+            apply_arg_presets=inputs["apply_arg_presets"],
+            overwrite_existing_args=inputs["overwrite_existing_args"],
+            auto_add_missing=inputs["auto_add_missing"],
+            behavior_engine_auto_detect=inputs["behavior_engine_auto_detect"],
             skip_auto_add_titles=tuple(skip_auto_add_titles),
-            skip_arg_preset_titles=("Pandora Behaviour Engine+",) if self.skip_pandora.get() else (),
-            language=self.lang.get().strip() or "korean",
-            edition=self.edition.get().strip() or "sse",
-            dry_run=dry_run,
-            backup=not bool(self.no_backup.get()),
+            skip_arg_preset_titles=("Pandora Behaviour Engine+",) if inputs["skip_pandora"] else (),
+            language=inputs["language"],
+            edition=inputs["edition"],
+            dry_run=inputs["dry_run"],
+            backup=inputs["backup"],
             non_interactive=True,
             args_overrides=args_overrides,
         )
@@ -617,7 +653,7 @@ class _App(tk.Tk):
             game_path=game_path,
             tool_root=tool_root,
             executables=inspect_custom_executables(ini) if ini and ini.exists() else (),
-            behavior_engine_auto_detect=bool(self.behavior_engine_auto_detect.get()),
+            behavior_engine_auto_detect=inputs["behavior_engine_auto_detect"],
         )
         return discovered, context, report
 
@@ -626,12 +662,14 @@ class _App(tk.Tk):
             return
 
         self._set_busy(True, "자동 감지 + 미리보기 중..." if dry_run else "자동 감지 + 적용 중...")
+        inputs = self._snapshot_inputs(dry_run)
 
         def worker() -> None:
             try:
-                discovered, context, report = self._patch_job(dry_run=dry_run)
+                discovered, context, report = self._patch_job(inputs)
             except Exception as e:
-                self.after(0, lambda: self._on_run_error(e))
+                # except 블록이 끝나면 e가 지워지므로 기본 인자로 묶어 둔다.
+                self.after(0, lambda exc=e: self._on_run_error(exc))
                 return
             self.after(
                 0,
@@ -647,6 +685,16 @@ class _App(tk.Tk):
 
     def _on_run_done(self, *, dry_run: bool, discovered, context: _PreviewContext, report: PatchReport) -> None:
         self._set_busy(False)
+
+        # 자동 감지로 채운 경로를 입력 칸에 반영(메인 스레드)
+        for var, value in (
+            (self.ini_path, context.ini_path),
+            (self.instance_root, context.instance_root),
+            (self.game_path, context.game_path),
+            (self.tool_root, context.tool_root),
+        ):
+            if value is not None and not var.get().strip():
+                var.set(str(value))
 
         warnings = tuple(getattr(discovered, "warnings", ()) or ())
         self._set_output(

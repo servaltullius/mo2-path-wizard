@@ -56,7 +56,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--apply-arg-presets",
         action="store_true",
-        help="일부 툴(xEdit/DynDOLOD 등)에 권장 arguments 템플릿을 적용(기존 arguments를 덮어씀)",
+        help="일부 툴(xEdit/DynDOLOD 등)의 비어 있는 arguments에 권장 템플릿을 적용",
+    )
+    parser.add_argument(
+        "--overwrite-args",
+        action="store_true",
+        help="--apply-arg-presets 사용 시 이미 있는 arguments도 프리셋으로 덮어씀(기본: 기존 값 보존)",
     )
     parser.add_argument(
         "--args-json",
@@ -113,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args_overrides: dict[str, str] = {}
     if args.args_json:
-        raw = json.loads(args.args_json.read_text(encoding="utf-8"))
+        try:
+            raw = json.loads(args.args_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"Error: --args-json을 읽지 못했습니다: {e}")
         if not isinstance(raw, dict):
             raise SystemExit("--args-json must be a JSON object")
         for k, v in raw.items():
@@ -129,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
 
     options = PatchOptions(
         apply_arg_presets=args.apply_arg_presets,
+        overwrite_existing_args=args.overwrite_args,
         auto_add_missing=args.auto_add_missing,
         behavior_engine_auto_detect=not args.no_behavior_engine_auto_detect,
         skip_auto_add_titles=tuple(skip_auto_add_titles),
