@@ -299,9 +299,13 @@ class _App(tk.Tk):
         root.columnconfigure(1, weight=1)
         root.rowconfigure(1, weight=1)
 
-        controls = ttk.Frame(root, style="App.TFrame")
-        controls.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
-        controls.columnconfigure(0, weight=1)
+        controls_side = ttk.Frame(root, style="App.TFrame")
+        controls_side.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
+        controls_side.columnconfigure(0, weight=1)
+        controls_side.rowconfigure(0, weight=1)
+        # 설정 카드들은 스크롤 영역에 넣고, 미리보기/적용 버튼은 그 아래에 고정한다.
+        # (창이 작거나 고급 경로를 펼쳐도 실행 버튼이 화면 밖으로 밀려나지 않도록)
+        controls = self._build_scroll_area(controls_side)
 
         output_side = ttk.Frame(root, style="App.TFrame")
         output_side.grid(row=1, column=1, sticky="nsew")
@@ -413,8 +417,8 @@ class _App(tk.Tk):
         self.advanced_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         self.advanced_frame.grid_remove()
 
-        actions = ttk.Frame(controls, style="App.TFrame")
-        actions.grid(row=4, column=0, sticky="ew", pady=(14, 0))
+        actions = ttk.Frame(controls_side, style="App.TFrame")
+        actions.grid(row=1, column=0, sticky="ew", pady=(14, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         self.btn_preview = ttk.Button(actions, text="자동 감지 + 미리보기", style="Secondary.TButton", command=self._preview)
@@ -430,9 +434,10 @@ class _App(tk.Tk):
 
         out_header = ttk.Frame(output_side, style="App.TFrame")
         out_header.grid(row=0, column=0, sticky="ew")
-        ttk.Label(out_header, text="현재 상태 및 변경 미리보기", style="PanelTitle.TLabel").pack(side="left")
+        # 폭이 모자라면 나중에 pack한 위젯부터 잘리므로, 버튼을 먼저 놓고 제목을 마지막에 놓는다.
         ttk.Button(out_header, text="복사", style="Ghost.TButton", command=self._copy_output).pack(side="right")
         ttk.Button(out_header, text="지우기", style="Ghost.TButton", command=self._clear_output).pack(side="right", padx=(0, 8))
+        ttk.Label(out_header, text="현재 상태 및 변경 미리보기", style="PanelTitle.TLabel").pack(side="left")
 
         out = ttk.Frame(output_side, style="Output.TFrame", padding=1)
         out.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
@@ -478,11 +483,70 @@ class _App(tk.Tk):
             row=0, column=2, sticky="e", padx=(8, 0)
         )
 
+    def _build_scroll_area(self, parent: ttk.Frame) -> ttk.Frame:
+        """세로 스크롤되는 영역을 만들고 그 안쪽 프레임을 돌려준다. 내용이 넘칠 때만 스크롤바를 보인다."""
+        area = ttk.Frame(parent, style="App.TFrame")
+        area.grid(row=0, column=0, sticky="nsew")
+        area.columnconfigure(0, weight=1)
+        area.rowconfigure(0, weight=1)
+
+        canvas = tk.Canvas(area, highlightthickness=0, borderwidth=0, background=self._palette["bg"])
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(area, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        inner = ttk.Frame(canvas, style="App.TFrame")
+        inner.columnconfigure(0, weight=1)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def sync(_event=None) -> None:
+            canvas.configure(scrollregion=(0, 0, inner.winfo_reqwidth(), inner.winfo_reqheight()))
+            canvas.configure(width=inner.winfo_reqwidth())
+            canvas.itemconfigure(window, width=max(canvas.winfo_width(), inner.winfo_reqwidth()))
+            if inner.winfo_reqheight() > canvas.winfo_height() > 1:
+                scrollbar.grid()
+            else:
+                scrollbar.grid_remove()
+                canvas.yview_moveto(0)
+
+        inner.bind("<Configure>", sync)
+        canvas.bind("<Configure>", sync)
+
+        def on_wheel(event: tk.Event) -> str | None:
+            if inner.winfo_reqheight() <= canvas.winfo_height():
+                return None
+            step = -1 if (getattr(event, "delta", 0) > 0 or getattr(event, "num", 0) == 4) else 1
+            canvas.yview_scroll(step * 3, "units")
+            return "break"
+
+        # 마우스가 설정 영역 위에 있을 때만 휠로 스크롤한다(오른쪽 출력 창 스크롤과 겹치지 않게).
+        def bind_wheel(_event=None) -> None:
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                canvas.bind_all(seq, on_wheel)
+
+        def unbind_wheel(_event=None) -> None:
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                canvas.unbind_all(seq)
+
+        area.bind("<Enter>", bind_wheel)
+        area.bind("<Leave>", unbind_wheel)
+
+        self._controls_canvas = canvas
+        self._controls_sync = sync
+        return inner
+
     def _toggle_advanced(self) -> None:
         if bool(self.show_advanced.get()):
             self.advanced_frame.grid()
+            # 펼친 고급 경로가 보이도록 아래로 스크롤
+            self.update_idletasks()
+            self._controls_sync()
+            self._controls_canvas.yview_moveto(1.0)
         else:
             self.advanced_frame.grid_remove()
+            self.update_idletasks()
+            self._controls_sync()
 
     def _set_busy(self, busy: bool, message: str | None = None) -> None:
         self._busy = busy

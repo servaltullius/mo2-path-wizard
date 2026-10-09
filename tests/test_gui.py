@@ -127,5 +127,26 @@ class TestGuiPreviewOutput(unittest.TestCase):
             app.destroy()
 
 
+    def test_action_buttons_stay_visible_when_advanced_paths_are_shown(self) -> None:
+        app = _App()
+        try:
+            app.geometry("980x660")
+            app.update()
+            app.show_advanced.set(True)
+            app._toggle_advanced()
+            app.update()
+
+            window_bottom = app.winfo_rooty() + app.winfo_height()
+            for button in (app.btn_preview, app.btn_apply):
+                self.assertTrue(button.winfo_ismapped())
+                self.assertLessEqual(button.winfo_rooty() + button.winfo_height(), window_bottom)
+            # 설정 영역은 스크롤되며, 펼친 고급 경로 쪽으로 내려가 있다.
+            first, last = app._controls_canvas.yview()
+            self.assertGreater(first, 0.0)
+            self.assertAlmostEqual(1.0, last, places=2)
+        finally:
+            app.destroy()
+
+
 if __name__ == "__main__":
     unittest.main()
