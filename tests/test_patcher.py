@@ -1112,6 +1112,17 @@ class TestReviewRegressions(unittest.TestCase):
             self.assertFalse(report.changed)
             self.assertTrue(any("그대로 둡니다" in w for w in report.warnings))
 
+    def test_unmoved_tools_folder_gives_no_warning(self) -> None:
+        with TemporaryDirectory() as td:
+            pack = Path(td) / "Pack"
+            exe = _touch(pack / "TOOLS" / "SSEEdit" / "SSEEdit.exe")
+            (pack / "mods").mkdir()
+            ini = pack / "ModOrganizer.ini"
+            _write_bytes(ini, f"[customExecutables]\r\nsize=1\r\n1\\binary={_posix(exe)}\r\n1\\title=SSEEdit\r\n")
+            report = _patch(ini, pack, dry_run=True)
+            self.assertFalse(report.changed)
+            self.assertFalse(any("그대로 둡니다" in w for w in report.warnings), report.warnings)
+
     def test_drive_root_is_never_a_replacement_rule(self) -> None:
         self.assertEqual([], _build_replacements("D:/", "G:/Pack"))
         self.assertEqual([], _build_replacements("D:\\", "G:/Pack"))

@@ -510,6 +510,8 @@ def _keep_old_location(old_root: str, moves: list[tuple[str, str]]) -> bool:
 def _add_checked_move(
     rules: list[Rule], moves: list[tuple[str, str]], old: str, new: Path, warnings: list[str]
 ) -> None:
+    if same_path_text(old, to_posix(new)):
+        return  # 옮겨지지 않았다
     if _keep_old_location(old, moves):
         note = f"옛 경로가 아직 있어 그대로 둡니다: {normalize_slashes(old)}"
         if note not in warnings:
