@@ -48,3 +48,22 @@
   - 옛 경로가 남지 않습니다.
   - 줄 수, CRLF, 키 순서가 유지됩니다.
   - 같은 INI에 두 번째로 실행하면 변경 없음으로 나옵니다.
+- Windows CI에서 전체 테스트 `46`개 통과 후 빌드했습니다.
+- 빌드된 CLI 실행 파일로 실제 `G:\TAKEALOOK` dry-run(기본, `--auto-add-missing`, `--apply-arg-presets` 조합)을 확인했습니다. 모두 변경 없음이며 INI는 수정되지 않았습니다.
+
+## 권장 다운로드
+
+- `mo2-path-wizard-gui.zip`
+
+## 추가 다운로드
+
+- `mo2-path-wizard-gui.exe`
+- `mo2-path-wizard.exe`
+
+## SHA256
+
+```text
+D082DD612CB1BCA8B21022C71ACD6F51EB27F810B2E11F24143D81A0DC20E2EC  mo2-path-wizard-gui.zip
+D996C908F06A4EA5D4C269ACFBDA24C940870418B010A078FB700B8607F558B4  mo2-path-wizard-gui.exe
+D98F8F2D9B96F1749C924E2D4C19206B5B7B8251051341000CB48E3703C7E1FE  mo2-path-wizard.exe
+```
