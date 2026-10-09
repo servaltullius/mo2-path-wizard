@@ -56,10 +56,10 @@ DEFAULT_EXECUTABLE_SPECS: tuple[ExecutableSpec, ...] = (
 
 def _find_file_depth(root: Path, filename: str, max_depth: int) -> Path | None:
     filename_l = filename.lower()
-    root = root.resolve()
+    # resolve() 하면 8.3 짧은 경로/subst 드라이브가 다른 표기로 바뀌어 INI 경로가 섞이므로 원래 표기를 유지한다.
     for dirpath, dirnames, filenames in os.walk(root):
         try:
-            rel = Path(dirpath).resolve().relative_to(root)
+            rel = Path(dirpath).relative_to(root)
             depth = len(rel.parts)
         except Exception:
             depth = 0

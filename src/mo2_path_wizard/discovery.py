@@ -63,10 +63,9 @@ def _join_real_case(base: Path, relative: Path) -> Path:
 
 
 def _walk_dirs(root: Path, max_depth: int):
-    root = root.resolve()
     for dirpath, dirnames, filenames in os.walk(root):
         try:
-            rel = Path(dirpath).resolve().relative_to(root)
+            rel = Path(dirpath).relative_to(root)
             depth = len(rel.parts)
         except Exception:
             depth = 0
@@ -342,7 +341,8 @@ def _find_tool_root(root: Path, instance_root: Path | None) -> Path | None:
 
 
 def discover_from_root(root: Path, edition: str = "sse") -> DiscoveredPaths:
-    root = root.expanduser().resolve()
+    # resolve() 대신 abspath: 8.3 짧은 경로/subst 드라이브 표기를 유지해 INI에 쓰는 경로가 섞이지 않게 한다.
+    root = Path(os.path.abspath(root.expanduser()))
     warnings: list[str] = []
 
     if not root.is_dir():

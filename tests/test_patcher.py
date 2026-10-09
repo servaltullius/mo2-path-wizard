@@ -1,5 +1,4 @@
 import unittest
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,6 +13,15 @@ from mo2_path_wizard.patcher import (
 
 def _write_bytes(path: Path, text: str) -> None:
     path.write_bytes(text.encode("utf-8"))
+
+
+def _posix(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _escaped_win(path: Path) -> str:
+    """INI의 @ByteArray/arguments 안에 들어가는 백슬래시 2개 형태."""
+    return str(path).replace("/", "\\").replace("\\", "\\\\")
 
 
 class TestPatcher(unittest.TestCase):
@@ -132,37 +140,32 @@ class TestPatcher(unittest.TestCase):
             ini_path = tmp / "ModOrganizer.ini"
             _write_bytes(ini_path, ini_text)
 
-            old_cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                instance_root = Path("D:/New/Instance")
-                game_root = Path("D:/New/Instance/Stock Game")
-                tool_root = Path("D:/New/Instance/tools")
+            instance_root = tmp / "New" / "Instance"
+            game_root = instance_root / "Stock Game"
+            tool_root = instance_root / "tools"
 
-                (game_root / "Data").mkdir(parents=True, exist_ok=True)
-                (game_root / "SkyrimSE.exe").write_bytes(b"")
-                (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
-                (tool_root / "SSEEdit" / "SSEEdit.exe").write_bytes(b"")
+            (game_root / "Data").mkdir(parents=True, exist_ok=True)
+            (game_root / "SkyrimSE.exe").write_bytes(b"")
+            (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
+            (tool_root / "SSEEdit" / "SSEEdit.exe").write_bytes(b"")
 
-                report = patch_modorganizer_ini(
-                    ini_path=ini_path,
-                    instance_root=instance_root,
-                    game_path=game_root,
-                    tool_root=tool_root,
-                    options=PatchOptions(apply_arg_presets=True, language="english", backup=False),
-                )
-            finally:
-                os.chdir(old_cwd)
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance_root,
+                game_path=game_root,
+                tool_root=tool_root,
+                options=PatchOptions(apply_arg_presets=True, language="english", backup=False),
+            )
 
             self.assertTrue(report.ok)
             self.assertTrue(report.changed)
 
             patched = ini_path.read_text(encoding="utf-8")
-            self.assertIn("base_directory=D:/New/Instance", patched)
-            self.assertIn("gamePath=@ByteArray(D:\\\\New\\\\Instance\\\\Stock Game)", patched)
-            self.assertIn("1\\binary=D:/New/Instance/tools/SSEEdit/SSEEdit.exe", patched)
-            self.assertIn("1\\workingDirectory=D:/New/Instance/tools/SSEEdit", patched)
-            self.assertIn("-D:\\\"D:\\\\New\\\\Instance\\\\Stock Game\\\\Data\\\" -l:english", patched)
+            self.assertIn(f"base_directory={_posix(instance_root)}", patched)
+            self.assertIn(f"gamePath=@ByteArray({_escaped_win(game_root)})", patched)
+            self.assertIn(f"1\\binary={_posix(tool_root)}/SSEEdit/SSEEdit.exe", patched)
+            self.assertIn(f"1\\workingDirectory={_posix(tool_root)}/SSEEdit", patched)
+            self.assertIn(f'-D:\\"{_escaped_win(game_root / "Data")}\\" -l:english', patched)
 
     def test_args_override_template(self) -> None:
         ini_text = (
@@ -185,36 +188,31 @@ class TestPatcher(unittest.TestCase):
             ini_path = tmp / "ModOrganizer.ini"
             _write_bytes(ini_path, ini_text)
 
-            old_cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                instance_root = Path("D:/New/Instance")
-                game_root = Path("D:/New/Instance/Stock Game")
-                tool_root = Path("D:/New/Instance/tools")
+            instance_root = tmp / "New" / "Instance"
+            game_root = instance_root / "Stock Game"
+            tool_root = instance_root / "tools"
 
-                (game_root / "Data").mkdir(parents=True, exist_ok=True)
-                (game_root / "SkyrimSE.exe").write_bytes(b"")
-                (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
+            (game_root / "Data").mkdir(parents=True, exist_ok=True)
+            (game_root / "SkyrimSE.exe").write_bytes(b"")
+            (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
 
-                report = patch_modorganizer_ini(
-                    ini_path=ini_path,
-                    instance_root=instance_root,
-                    game_path=game_root,
-                    tool_root=tool_root,
-                    options=PatchOptions(
-                        apply_arg_presets=False,
-                        backup=False,
-                        args_overrides={"edit": '-D:"{data}" -l:korean'},
-                    ),
-                )
-            finally:
-                os.chdir(old_cwd)
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance_root,
+                game_path=game_root,
+                tool_root=tool_root,
+                options=PatchOptions(
+                    apply_arg_presets=False,
+                    backup=False,
+                    args_overrides={"edit": '-D:"{data}" -l:korean'},
+                ),
+            )
 
             self.assertTrue(report.ok)
             self.assertTrue(report.changed)
 
             patched = ini_path.read_text(encoding="utf-8")
-            self.assertIn("-D:\\\"D:\\\\New\\\\Instance\\\\Stock Game\\\\Data\\\" -l:korean", patched)
+            self.assertIn(f'-D:\\"{_escaped_win(game_root / "Data")}\\" -l:korean', patched)
 
     def test_recent_directories_rewrite(self) -> None:
         ini_text = (
@@ -260,31 +258,24 @@ class TestPatcher(unittest.TestCase):
             ini_path = tmp / "ModOrganizer.ini"
             _write_bytes(ini_path, ini_text)
 
-            old_cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                instance_root = Path("D:/New/Instance")
-                stock_parent = Path("D:/New/Instance/STOCKGAME")
-                game_dir = stock_parent / "Skyrim Special Edition"
+            instance_root = tmp / "New" / "Instance"
+            stock_parent = instance_root / "STOCKGAME"
+            game_dir = stock_parent / "Skyrim Special Edition"
 
-                (game_dir / "Data").mkdir(parents=True, exist_ok=True)
-                (game_dir / "SkyrimSE.exe").write_bytes(b"")
+            (game_dir / "Data").mkdir(parents=True, exist_ok=True)
+            (game_dir / "SkyrimSE.exe").write_bytes(b"")
 
-                report = patch_modorganizer_ini(
-                    ini_path=ini_path,
-                    instance_root=instance_root,
-                    game_path=stock_parent,
-                    tool_root=None,
-                    options=PatchOptions(backup=False),
-                )
-            finally:
-                os.chdir(old_cwd)
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance_root,
+                game_path=stock_parent,
+                tool_root=None,
+                options=PatchOptions(backup=False),
+            )
 
             self.assertTrue(report.ok)
             patched = ini_path.read_text(encoding="utf-8")
-            self.assertIn(
-                "gamePath=@ByteArray(D:\\\\New\\\\Instance\\\\STOCKGAME\\\\Skyrim Special Edition)", patched
-            )
+            self.assertIn(f"gamePath=@ByteArray({_escaped_win(game_dir)})", patched)
 
     def test_rewrites_old_stockgame_paths_from_custom_executables(self) -> None:
         ini_text = (
@@ -307,47 +298,42 @@ class TestPatcher(unittest.TestCase):
         )
 
         with TemporaryDirectory() as td:
-            tmp = Path(td)
+            # 실제 드라이브(G:\ 등)에 쓰지 않도록 임시 폴더를 새 모드팩 위치로 사용한다.
+            pack_root = Path(td) / "ENIRIM Classic"
+            instance_root = pack_root / "SkyrimSE"
+            game_root = pack_root / "STOCKGAME"
+            tool_root = pack_root / "Tools"
 
-            old_cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                pack_root = Path("G:/ENIRIM Classic")
-                instance_root = pack_root / "SkyrimSE"
-                game_root = pack_root / "STOCKGAME"
-                tool_root = pack_root / "Tools"
+            (instance_root / "mods").mkdir(parents=True, exist_ok=True)
+            (instance_root / "profiles").mkdir(parents=True, exist_ok=True)
+            (game_root / "Data").mkdir(parents=True, exist_ok=True)
+            (game_root / "SkyrimSE.exe").write_bytes(b"")
+            (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
+            (tool_root / "SSEEdit" / "SSEEdit.exe").write_bytes(b"")
 
-                (instance_root / "mods").mkdir(parents=True, exist_ok=True)
-                (instance_root / "profiles").mkdir(parents=True, exist_ok=True)
-                (game_root / "Data").mkdir(parents=True, exist_ok=True)
-                (game_root / "SkyrimSE.exe").write_bytes(b"")
-                (tool_root / "SSEEdit").mkdir(parents=True, exist_ok=True)
-                (tool_root / "SSEEdit" / "SSEEdit.exe").write_bytes(b"")
+            ini_path = pack_root / "MO2" / "ModOrganizer.ini"
+            ini_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_bytes(ini_path, ini_text)
 
-                ini_path = pack_root / "MO2" / "ModOrganizer.ini"
-                ini_path.parent.mkdir(parents=True, exist_ok=True)
-                _write_bytes(ini_path, ini_text)
-
-                report = patch_modorganizer_ini(
-                    ini_path=ini_path,
-                    instance_root=instance_root,
-                    game_path=game_root,
-                    tool_root=tool_root,
-                    options=PatchOptions(backup=False),
-                )
-            finally:
-                os.chdir(old_cwd)
+            report = patch_modorganizer_ini(
+                ini_path=ini_path,
+                instance_root=instance_root,
+                game_path=game_root,
+                tool_root=tool_root,
+                options=PatchOptions(backup=False),
+            )
 
             self.assertTrue(report.ok)
             self.assertTrue(report.changed)
 
-            patched = (tmp / ini_path).read_text(encoding="utf-8")
-            self.assertIn("base_directory=G:/ENIRIM Classic/SkyrimSE", patched)
-            self.assertIn("gamePath=@ByteArray(G:\\\\ENIRIM Classic\\\\STOCKGAME)", patched)
-            self.assertIn("1\\workingDirectory=G:/ENIRIM Classic/STOCKGAME", patched)
-            self.assertIn('1\\arguments=-d:\\\"G:\\\\ENIRIM Classic\\\\STOCKGAME\\\\data\\\" -l:korean', patched)
-            self.assertIn("2\\binary=G:/ENIRIM Classic/MO2/explorer++/Explorer++.exe", patched)
-            self.assertIn("2\\workingDirectory=G:/ENIRIM Classic/MO2/explorer++", patched)
+            patched = ini_path.read_text(encoding="utf-8")
+            self.assertNotIn("D:/ENIRIM Classic", patched)
+            self.assertIn(f"base_directory={_posix(instance_root)}", patched)
+            self.assertIn(f"gamePath=@ByteArray({_escaped_win(game_root)})", patched)
+            self.assertIn(f"1\\workingDirectory={_posix(game_root)}", patched)
+            self.assertIn(f'1\\arguments=-d:\\"{_escaped_win(game_root / "data")}\\" -l:korean', patched)
+            self.assertIn(f"2\\binary={_posix(pack_root)}/MO2/explorer++/Explorer++.exe", patched)
+            self.assertIn(f"2\\workingDirectory={_posix(pack_root)}/MO2/explorer++", patched)
 
     def test_auto_add_missing_executables(self) -> None:
         ini_text = (
