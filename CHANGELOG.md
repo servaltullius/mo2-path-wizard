@@ -1,5 +1,31 @@
 # 변경 내역
 
+## v1.0.7 - 2026-10-09
+
+### 요약
+
+이번 릴리즈는 입력한 경로의 표기를 그대로 유지하도록 고쳐, 8.3 짧은 경로나 subst/네트워크 드라이브를 쓸 때 INI 안에 서로 다른 경로 표기가 섞이던 문제를 수정한 버전입니다. 함께 5월부터 실패하던 Windows CI를 복구했습니다.
+
+### 수정
+
+- 경로 자동 감지와 실행 파일 탐색이 경로를 `resolve()`로 바꾸지 않고 입력받은 표기를 그대로 사용합니다.
+  - 예: `C:\Users\RUNNER~1\...`로 입력했을 때 `base_directory`는 짧은 경로, 자동 추가된 실행 파일은 `C:\Users\runneradmin\...` 긴 경로로 섞여 기록되던 문제
+  - subst 드라이브나 연결된 네트워크 드라이브도 실제 경로로 바뀌지 않고 그대로 유지됩니다.
+- 패키지 `__version__`이 `0.1.0`으로 남아 있던 문제를 수정했습니다. 이제 `__version__`이 유일한 버전 정보이며 `pyproject.toml`은 이를 읽어 갑니다.
+
+### 개발
+
+- 테스트가 실제 `G:\`, `D:\` 드라이브에 폴더를 만들던 문제를 수정했습니다. 모든 테스트는 임시 폴더 안에서만 동작합니다.
+- GitHub Actions를 `checkout`/`setup-python`/`upload-artifact` `v7`(Node 24)로 올렸습니다.
+- 오래된 `AGENTS.md`를 삭제했습니다.
+
+### 검증
+
+- Windows CI(GitHub Actions `windows-latest`, Python 3.12)에서 전체 테스트 실행:
+  - `python -m unittest discover -s tests -p "test*.py" -v`
+  - 결과: 테스트 `21`개 통과
+- CI에서 PyInstaller로 CLI/GUI 실행 파일을 빌드했습니다.
+
 ## v1.0.6 - 2026-05-04
 
 ### 요약
