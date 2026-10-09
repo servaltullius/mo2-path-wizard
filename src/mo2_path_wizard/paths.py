@@ -63,6 +63,9 @@ def build_replacements(old_path: str, new_path: str) -> list[Rule]:
     new_posix = normalize_slashes(new_path).rstrip("/")
     if not old_posix or old_posix.lower() == new_posix.lower():
         return []
+    # 드라이브 루트(D:/)는 규칙이 "D:"만 남아 xEdit의 -D: 같은 인자까지 바꿔 버리므로 다루지 않는다.
+    if len(split_segments(old_posix)) < 2:
+        return []
     old_win = old_posix.replace("/", "\\")
     new_win = new_posix.replace("/", "\\")
     return [
@@ -75,7 +78,8 @@ def build_replacements(old_path: str, new_path: str) -> list[Rule]:
 _BOUNDARY_CHARS = frozenset('/\\"\'()[]{}<>,;|\r\n')
 # 공백 뒤가 이런 형태면 경로가 끝난 것으로 본다(다음 인자 시작). 그 외 공백은 폴더 이름의 일부일 수 있다
 # (예: "D:\\TAKEALOOK - Outputs"가 "D:\\TAKEALOOK" 규칙에 걸리면 안 됨).
-_ARG_AFTER_SPACE_RE = re.compile(r'[ \t]+(?:$|[\r\n]|-{1,2}[A-Za-z]|\\?")')
+# "-v2\\mods"처럼 경로 구분자가 이어지면 다음 인자가 아니라 폴더 이름이다.
+_ARG_AFTER_SPACE_RE = re.compile(r'[ \t]+(?:$|[\r\n]|-{1,2}[A-Za-z][^ \t"\\/]*(?=$|[ \t\r\n"]|\\")|\\?")')
 
 
 def _has_end_boundary(value: str, index: int) -> bool:
@@ -139,6 +143,14 @@ def apply_replacements(value: str, replacements: list[Rule]) -> str:
 
 # 텍스트(INI 값, JSON, XML 등) 안의 Windows 절대 경로 후보: 드라이브 문자 또는 UNC로 시작
 _ABS_PATH_RE = re.compile(r'(?<![A-Za-z0-9])(?:[A-Za-z]:|\\\\\\\\|\\\\|//)(?:\\\\|\\|/)?[^"<>|\r\n*?]*')
+
+
+_LINE_RE = re.compile(r"[^\r\n]*(?:\r\n|\n|\r)|[^\r\n]+$")
+
+
+def split_lines_keepends(text: str) -> list[str]:
+    """\r\n, \n, \r에서만 줄을 나눈다(str.splitlines는 \x0c, \x85 등에서도 나눈다)."""
+    return _LINE_RE.findall(text)
 
 
 def find_absolute_paths(text: str) -> list[str]:

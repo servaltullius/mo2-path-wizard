@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import codecs
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from .paths import Rule, apply_replacements, find_absolute_paths
+from .paths import Rule, apply_replacements, find_absolute_paths, split_lines_keepends
 
 # 실행 파일 이름(소문자) -> (툴 이름, 실행 파일 폴더 기준 설정 파일 패턴들, 민감 정보 포함 여부)
 # 패턴의 각 구간은 대소문자를 구분하지 않으며 `*`는 임의의 한 구간이다.
@@ -87,12 +88,32 @@ def find_config_targets(executables: list[Path]) -> list[ExternalTarget]:
     return sorted(targets.values(), key=lambda t: (t.tool.lower(), str(t.path).lower()))
 
 
-def _decode(raw: bytes) -> tuple[str, str, bytes]:
-    """(텍스트, 인코딩, BOM)."""
+class _UnsafeEncoding(ValueError):
+    pass
+
+
+def _decode(raw: bytes) -> tuple[str, str, bytes, bool]:
+    """(텍스트, 인코딩, BOM, 올바른 UTF-8/UTF-16인지).
+
+    UTF-16은 깨진 문자가 있으면 다루지 않는다. BOM 없는 파일은 UTF-8로 읽되, UTF-8이 아닌 바이트
+    (ANSI/cp949 등)는 그대로 보존한다.
+    """
     for bom, enc in ((codecs.BOM_UTF8, "utf-8"), (codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be")):
         if raw.startswith(bom):
-            return raw[len(bom) :].decode(enc, errors="surrogateescape" if enc == "utf-8" else "replace"), enc, bom
-    return raw.decode("utf-8", errors="surrogateescape"), "utf-8", b""
+            body = raw[len(bom) :]
+            if enc != "utf-8":
+                try:
+                    return body.decode(enc), enc, bom, True
+                except UnicodeDecodeError as e:
+                    raise _UnsafeEncoding("UTF-16 파일에 깨진 문자가 있습니다") from e
+            raw = body
+            break
+    else:
+        bom = b""
+    try:
+        return raw.decode("utf-8"), "utf-8", bom, True
+    except UnicodeDecodeError:
+        return raw.decode("utf-8", errors="surrogateescape"), "utf-8", bom, False
 
 
 def _encode(text: str, encoding: str, bom: bytes) -> bytes:
@@ -101,19 +122,40 @@ def _encode(text: str, encoding: str, bom: bytes) -> bytes:
 
 def read_paths(target: ExternalTarget) -> list[str]:
     try:
-        text, _, _ = _decode(target.path.read_bytes())
-    except OSError:
+        text, _, _, _ = _decode(target.path.read_bytes())
+    except (OSError, _UnsafeEncoding):
         return []
     return find_absolute_paths(text)
+
+
+def check_change(target: ExternalTarget, rules: list[Rule]) -> str | None:
+    """이 파일을 안전하게 고칠 수 없으면 이유를 돌려준다."""
+    try:
+        raw = target.path.read_bytes()
+        text, _, _, valid_utf = _decode(raw)
+    except OSError as e:
+        return f"읽을 수 없음: {e}"
+    except _UnsafeEncoding as e:
+        return str(e)
+    if not valid_utf:
+        lines = split_lines_keepends(text)
+        if any(apply_replacements(line, rules) != line for line in lines) and any(
+            not new.isascii() for _, new in rules
+        ):
+            # ANSI(cp949 등) 파일에 UTF-8 한글 경로를 쓰면 툴이 깨진 경로로 읽는다.
+            return "ANSI 인코딩 파일이라 한글 등이 들어간 새 경로를 안전하게 쓸 수 없습니다"
+    if not os.access(target.path, os.W_OK) or not os.access(target.path.parent, os.W_OK):
+        return "쓰기 권한이 없습니다"
+    return None
 
 
 def plan_change(target: ExternalTarget, rules: list[Rule]) -> ExternalChange | None:
     try:
         raw = target.path.read_bytes()
-    except OSError:
+        text, encoding, bom, _ = _decode(raw)
+    except (OSError, _UnsafeEncoding):
         return None
-    text, encoding, bom = _decode(raw)
-    old_lines = text.splitlines(keepends=True)
+    old_lines = split_lines_keepends(text)
     new_lines = [apply_replacements(line, rules) for line in old_lines]
     if new_lines == old_lines:
         return None

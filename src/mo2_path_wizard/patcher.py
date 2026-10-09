@@ -22,14 +22,16 @@ from pathlib import Path
 
 from . import qtini
 from .executables import DEFAULT_EXECUTABLE_SPECS, ExecutableSpec, _FileIndex, locate_executable
-from .external import ExternalChange, find_config_targets, plan_change, read_paths, write_change
+from .external import ExternalChange, check_change, find_config_targets, plan_change, read_paths, write_change
 from .paths import (
     Rule,
     apply_replacements,
     build_replacements,
     find_absolute_paths,
+    is_under,
     normalize_slashes,
     same_path_text,
+    split_lines_keepends,
     split_segments,
     to_posix,
 )
@@ -135,7 +137,7 @@ class _Ini:
     """줄 목록 + 섹션 위치. 줄을 끼워 넣으면 섹션 위치를 다시 계산한다."""
 
     def __init__(self, text: str, newline: str) -> None:
-        self.lines = text.splitlines(keepends=True)
+        self.lines = split_lines_keepends(text)
         self.newline = newline
         self.sections: dict[str, tuple[int, int]] = {}
         self.reindex()
@@ -476,6 +478,46 @@ def _add_move(rules: list[Rule], moves: list[tuple[str, str]], old: str | None, 
     rules.extend(built)
 
 
+def _looks_like_pack_dir(path: Path) -> bool:
+    try:
+        return path.is_dir() and (
+            (path / "mods").is_dir()
+            or (path / "profiles").is_dir()
+            or (path / "ModOrganizer.ini").is_file()
+            or (path / "ModOrganizer.exe").is_file()
+        )
+    except OSError:
+        return False
+
+
+def _keep_old_location(old_root: str, moves: list[tuple[str, str]]) -> bool:
+    """옛 폴더를 그대로 둘지 판단한다.
+
+    옛 폴더가 아직 있고, 그것이 모드팩 자체(복사 전 원본)도 아니고 옮겨지는 옛 모드팩 안쪽도 아니면
+    일부러 따로 쓰는 폴더(예: 여러 모드팩이 같이 쓰는 툴 폴더)로 보고 바꾸지 않는다.
+    """
+    old_dir = Path(normalize_slashes(old_root))
+    try:
+        if not old_dir.is_dir():
+            return False
+    except OSError:
+        return False
+    if _looks_like_pack_dir(old_dir):
+        return False
+    return not any(is_under(old_root, moved_old) for moved_old, _ in moves)
+
+
+def _add_checked_move(
+    rules: list[Rule], moves: list[tuple[str, str]], old: str, new: Path, warnings: list[str]
+) -> None:
+    if _keep_old_location(old, moves):
+        note = f"옛 경로가 아직 있어 그대로 둡니다: {normalize_slashes(old)}"
+        if note not in warnings:
+            warnings.append(note)
+        return
+    _add_move(rules, moves, old, new)
+
+
 def _add_inferred_moves(
     rules: list[Rule],
     moves: list[tuple[str, str]],
@@ -485,19 +527,10 @@ def _add_inferred_moves(
     *,
     require_name_match: bool = False,
 ) -> None:
-    for move in infer_root_moves(old_paths, anchors, require_name_match=require_name_match):
-        old_dir = Path(move.old_root)
-        try:
-            still_there = old_dir.is_dir()
-        except OSError:
-            still_there = False
-        if still_there:
-            # 옛 폴더가 아직 있으면 일부러 다른 곳(예: 모드팩 밖의 툴 폴더)을 쓰는 것일 수 있다.
-            note = f"옛 경로가 아직 있어 그대로 둡니다: {move.old_root}"
-            if note not in warnings:
-                warnings.append(note)
-            continue
-        _add_move(rules, moves, move.old_root, move.new_root)
+    found = infer_root_moves(old_paths, anchors, require_name_match=require_name_match)
+    # 바깥(짧은) 루트부터 처리해야 '옮겨지는 옛 모드팩 안쪽인지'를 판단할 수 있다.
+    for move in sorted(found, key=lambda m: len(split_segments(m.old_root))):
+        _add_checked_move(rules, moves, move.old_root, move.new_root, warnings)
 
 
 def _build_plan(
@@ -533,8 +566,19 @@ def _build_plan(
 
     rules: list[Rule] = []
     moves: list[tuple[str, str]] = []
+    if old_base_dir and len(split_segments(old_base_dir)) < 2:
+        warnings.append(f"드라이브 루트({old_base_dir})에 있던 모드팩은 경로를 자동으로 옮기지 않습니다.")
     _add_move(rules, moves, old_base_dir, instance_root)
     _add_move(rules, moves, old_game, game_path)
+
+    # 옛 경로들의 뒷부분이 새 모드팩 아래에 실제로 있는지로 '어디서 어디로 옮겼는지' 추론
+    pack = _pack_root([p for p in (instance_root, ini_path.parent, game_path, tool_root) if p is not None])
+    anchors: list[Path] = []
+    for a in (instance_root, pack, tool_root):
+        if a is not None and all(str(a).lower() != str(b).lower() for b in anchors):
+            anchors.append(a)
+    _add_inferred_moves(rules, moves, _collect_ini_paths(ini, old_base_dir, old_game), anchors, warnings)
+
     if old_tool_root and tool_root is not None:
         # 새 모드팩에 옛 Tools 폴더와 이름이 같은 폴더가 있으면 그쪽으로 옮긴 것으로 본다.
         tool_target = tool_root
@@ -544,15 +588,7 @@ def _build_plan(
             if same_name:
                 tool_target = same_name[0]
                 break
-        _add_move(rules, moves, old_tool_root, tool_target)
-
-    # 옛 경로들의 뒷부분이 새 모드팩 아래에 실제로 있는지로 '어디서 어디로 옮겼는지' 추론
-    pack = _pack_root([p for p in (instance_root, ini_path.parent, game_path, tool_root) if p is not None])
-    anchors: list[Path] = []
-    for a in (instance_root, pack, tool_root):
-        if a is not None and all(str(a).lower() != str(b).lower() for b in anchors):
-            anchors.append(a)
-    _add_inferred_moves(rules, moves, _collect_ini_paths(ini, old_base_dir, old_game), anchors, warnings)
+        _add_checked_move(rules, moves, old_tool_root, tool_target, warnings)
 
     return _Plan(
         instance_root=instance_root,
@@ -818,6 +854,12 @@ def _plan_external(ini: _Ini, plan: _Plan) -> list[ExternalChange]:
 
     changes: list[ExternalChange] = []
     for t in targets:
+        problem = check_change(t, rules)
+        if problem:
+            change = plan_change(t, rules)
+            if change is not None:  # 고칠 내용이 있는데 안전하게 쓸 수 없는 파일만 알린다
+                plan.warnings.append(f"툴 설정 파일을 건너뜀({problem}): {t.path}")
+            continue
         change = plan_change(t, rules)
         if change is not None:
             changes.append(change)
@@ -982,17 +1024,38 @@ def patch_modorganizer_ini(
 
     backups: list[Path] = []
     if ini_changed:
-        if options.backup:
-            bak = ini_path.with_name(ini_path.name + ".bak")
-            if bak.exists():
-                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-                bak = ini_path.with_name(ini_path.name + f".bak.{ts}")
-            bak.write_bytes(original_text.encode("utf-8", errors="surrogateescape"))
-            backups.append(bak)
-        _write_text_preserve(ini_path, new_text)
+        try:
+            if options.backup:
+                bak = ini_path.with_name(ini_path.name + ".bak")
+                if bak.exists():
+                    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    bak = ini_path.with_name(ini_path.name + f".bak.{ts}")
+                bak.write_bytes(original_text.encode("utf-8", errors="surrogateescape"))
+                backups.append(bak)
+            _write_text_preserve(ini_path, new_text)
+        except OSError as e:
+            return PatchReport(
+                ok=False,
+                changed=False,
+                summary=f"ModOrganizer.ini를 쓰지 못했습니다(파일은 그대로입니다): {e}",
+                diff=diff,
+                **report_fields,
+            )
+
+    write_errors: list[str] = []
+    written: list[ExternalChange] = []
     for change in external:
-        bak = write_change(change, backup=options.backup)
+        try:
+            bak = write_change(change, backup=options.backup)
+        except OSError as e:
+            write_errors.append(f"툴 설정 파일을 쓰지 못함: {change.path} ({e})")
+            continue
+        written.append(change)
         if bak:
             backups.append(bak)
+    if write_errors:
+        summary += "".join(f"\n- warn: {w}" for w in write_errors)
+        report_fields["warnings"] = tuple(warnings) + tuple(write_errors)
+        report_fields["external"] = tuple(written)
 
     return PatchReport(ok=True, changed=True, summary=summary, diff=diff, backups=tuple(backups), **report_fields)

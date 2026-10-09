@@ -27,6 +27,21 @@ class TestMo2Status(unittest.TestCase):
             self.assertTrue(other.any_running)
             self.assertFalse(none.any_running)
 
+    def test_relative_ini_path_matches_running_instance(self) -> None:
+        import os
+
+        with TemporaryDirectory() as td:
+            pack = Path(td) / "Pack"
+            pack.mkdir()
+            (pack / "ModOrganizer.exe").write_bytes(b"")
+            cwd = os.getcwd()
+            os.chdir(td)
+            try:
+                status = check_mo2_status(Path("Pack") / "ModOrganizer.ini", running=[pack / "ModOrganizer.exe"])
+            finally:
+                os.chdir(cwd)
+            self.assertTrue(status.same_instance)
+
     def test_unknown_process_path_is_treated_as_same(self) -> None:
         with TemporaryDirectory() as td:
             pack = Path(td) / "Pack"

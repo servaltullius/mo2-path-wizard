@@ -1072,5 +1072,95 @@ class TestPatcherV110(unittest.TestCase):
             self.assertEqual((), off.external)
 
 
+
+class TestReviewRegressions(unittest.TestCase):
+    def test_copied_pack_with_old_folder_still_present_is_fully_rewritten(self) -> None:
+        with TemporaryDirectory() as td:
+            # 'D:' 같은 이름의 폴더를 만들어 Windows 경로처럼 쓰는 대신, 옛 모드팩을 실제 폴더로 두고 이동 추론을 흉내 낸다.
+            from unittest import mock
+
+            from mo2_path_wizard import patcher
+            from mo2_path_wizard.relocate import RootMove
+
+            old = Path(td) / "G" / "TAKEALOOK"
+            new = Path(td) / "H" / "TAKEALOOK"
+            for root in (old, new):
+                _touch(root / "mods" / "SKSE" / "skse64_loader.exe")
+                _touch(root / "TOOLS" / "SSEEdit" / "SSEEdit.exe")
+            rules: list = []
+            moves: list = []
+            warnings: list = []
+            found = [
+                RootMove(old_root=_posix(old / "TOOLS"), new_root=new / "TOOLS", votes=2),
+                RootMove(old_root=_posix(old), new_root=new, votes=5),
+            ]
+            with mock.patch.object(patcher, "infer_root_moves", return_value=found):
+                patcher._add_inferred_moves(rules, moves, [], [new], warnings)
+            self.assertEqual({_posix(old), _posix(old / "TOOLS")}, {o for o, _ in moves})
+            self.assertEqual([], warnings)
+
+    def test_shared_tools_folder_outside_pack_is_kept(self) -> None:
+        with TemporaryDirectory() as td:
+            shared = Path(td) / "Shared" / "Tools"
+            _touch(shared / "SSEEdit" / "SSEEdit.exe")
+            pack = Path(td) / "Pack"
+            _touch(pack / "TOOLS" / "SSEEdit" / "SSEEdit.exe")
+            (pack / "mods").mkdir()
+            ini = pack / "ModOrganizer.ini"
+            _write_bytes(ini, f"[customExecutables]\r\nsize=1\r\n1\\binary={_posix(shared)}/SSEEdit/SSEEdit.exe\r\n1\\title=SSEEdit\r\n")
+            report = _patch(ini, pack, dry_run=True)
+            self.assertFalse(report.changed)
+            self.assertTrue(any("그대로 둡니다" in w for w in report.warnings))
+
+    def test_drive_root_is_never_a_replacement_rule(self) -> None:
+        self.assertEqual([], _build_replacements("D:/", "G:/Pack"))
+        self.assertEqual([], _build_replacements("D:\\", "G:/Pack"))
+
+    def test_sibling_folder_with_dash_suffix_is_not_rewritten(self) -> None:
+        rules = _build_replacements("D:/TAKEALOOK", "G:/TAKEALOOK")
+        self.assertEqual("D:\\TAKEALOOK -v2\\mods", _apply_replacements("D:\\TAKEALOOK -v2\\mods", rules))
+        self.assertEqual("D:/TAKEALOOK --Backup/x", _apply_replacements("D:/TAKEALOOK --Backup/x", rules))
+        self.assertEqual("-o:G:/TAKEALOOK -sse -l:korean", _apply_replacements("-o:D:/TAKEALOOK -sse -l:korean", rules))
+
+    def test_unwritable_tool_config_is_skipped_with_warning(self) -> None:
+        import os
+        import stat
+
+        if os.name == "nt" or os.geteuid() == 0:
+            self.skipTest("권한 테스트는 일반 사용자 POSIX에서만")
+        with TemporaryDirectory() as td:
+            pack = Path(td) / "TAKEALOOK"
+            (pack / "mods").mkdir(parents=True)
+            exe = _touch(pack / "TOOLS" / "BethINI" / "BethINI.exe")
+            cfg = exe.parent / "BethINI.ini"
+            cfg.write_bytes(b"sGamePath=D:\\TAKEALOOK\\Stock Game\\\r\n")
+            cfg.chmod(stat.S_IRUSR)
+            try:
+                ini = pack / "ModOrganizer.ini"
+                _write_bytes(ini, f"[customExecutables]\r\nsize=1\r\n1\\binary={_posix(exe)}\r\n1\\title=BethINI\r\n")
+                report = _patch(ini, pack)
+                self.assertTrue(report.ok)
+                self.assertEqual((), report.external)
+                self.assertTrue(any("쓰기 권한" in w for w in report.warnings))
+                self.assertIn(b"D:\\TAKEALOOK", cfg.read_bytes())
+            finally:
+                cfg.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    def test_ansi_config_is_not_given_non_ascii_paths(self) -> None:
+        from mo2_path_wizard.external import ExternalTarget, check_change
+
+        with TemporaryDirectory() as td:
+            cfg = Path(td) / "BethINI.ini"
+            cfg.write_bytes("sNote=한글\r\nsGamePath=D:\\TAKEALOOK\\Stock Game\\\r\n".encode("cp949"))
+            target = ExternalTarget(tool="BethINI", path=cfg)
+            self.assertIn("ANSI", check_change(target, _build_replacements("D:/TAKEALOOK", "G:/모드팩")))
+            self.assertIsNone(check_change(target, _build_replacements("D:/TAKEALOOK", "G:/TAKEALOOK")))
+
+    def test_ini_lines_split_only_on_newlines(self) -> None:
+        from mo2_path_wizard.paths import split_lines_keepends
+
+        self.assertEqual(["[S]\n", "note=a\x0cb\x85c\n", "x=1"], split_lines_keepends("[S]\nnote=a\x0cb\x85c\nx=1"))
+
+
 if __name__ == "__main__":
     unittest.main()

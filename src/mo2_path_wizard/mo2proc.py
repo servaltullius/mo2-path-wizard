@@ -6,6 +6,7 @@ MO2는 종료할 때 메모리의 설정을 ModOrganizer.ini에 다시 쓰므로
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,7 +102,15 @@ def list_running_mo2() -> list[Path] | None:
 
 
 def _same_dir(a: Path, b: Path) -> bool:
-    return str(a).replace("\\", "/").rstrip("/").lower() == str(b).replace("\\", "/").rstrip("/").lower()
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        pass
+
+    def norm(p: Path) -> str:
+        return os.path.normcase(os.path.abspath(p)).replace("\\", "/").rstrip("/").lower()
+
+    return norm(a) == norm(b)
 
 
 def check_mo2_status(ini_path: Path | None, *, running: list[Path] | None = None) -> Mo2Status:
@@ -115,6 +124,8 @@ def check_mo2_status(ini_path: Path | None, *, running: list[Path] | None = None
     if running is None:
         return Mo2Status(supported=False, running=(), same_instance=False)
 
+    if ini_path is not None:
+        ini_path = Path(os.path.abspath(ini_path))
     same = False
     portable = ini_path is not None and (ini_path.parent / "ModOrganizer.exe").is_file()
     for exe in running:
