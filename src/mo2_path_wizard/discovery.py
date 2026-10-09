@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import qtini
+from .presets import edition_from_game_name
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class DiscoveredPaths:
     game_path: Path | None
     tool_root: Path | None
     warnings: tuple[str, ...] = ()
+    edition: str = "sse"
 
     @property
     def ok(self) -> bool:
@@ -60,6 +62,14 @@ def _join_real_case(base: Path, relative: Path) -> Path:
     return cur
 
 
+def _depth_under(path: Path, root: Path) -> int:
+    """root 아래 깊이. 정션/심볼릭 링크로 root 밖을 가리키면 아주 깊은 것으로 본다."""
+    try:
+        return len(path.resolve().relative_to(root.resolve()).parts)
+    except (ValueError, OSError):
+        return 999
+
+
 def _walk_dirs(root: Path, max_depth: int):
     for dirpath, dirnames, filenames in os.walk(root):
         try:
@@ -75,13 +85,14 @@ def _walk_dirs(root: Path, max_depth: int):
         yield Path(dirpath), dirnames, filenames
 
 
-def _parse_ini_hints(ini_path: Path) -> tuple[str | None, str | None, list[str]]:
+def _parse_ini_hints(ini_path: Path) -> tuple[str | None, str | None, list[str], str]:
     base_directory: str | None = None
     game_path_raw: str | None = None
+    game_name = ""
     binaries: list[str] = []
 
     current_section: str | None = None
-    for raw_line in ini_path.read_text(encoding="utf-8", errors="surrogateescape").splitlines():
+    for raw_line in ini_path.read_text(encoding="utf-8-sig", errors="surrogateescape").splitlines():
         line = raw_line.strip()
         if not line:
             continue
@@ -93,6 +104,8 @@ def _parse_ini_hints(ini_path: Path) -> tuple[str | None, str | None, list[str]]
             base_directory = qtini.unescape_string(line.split("=", 1)[1].strip())
         elif current_section == "General" and line.startswith("gamePath="):
             game_path_raw = line.split("=", 1)[1].strip()
+        elif current_section == "General" and line.startswith("gameName="):
+            game_name = qtini.unescape_string(line.split("=", 1)[1].strip())
         elif current_section == "customExecutables":
             m2 = _CUSTOM_BINARY_RE.match(line)
             if m2:
@@ -101,7 +114,7 @@ def _parse_ini_hints(ini_path: Path) -> tuple[str | None, str | None, list[str]]
     game_path_str = None
     if game_path_raw:
         game_path_str = _parse_bytearray_path(game_path_raw) or game_path_raw
-    return base_directory, game_path_str, binaries
+    return base_directory, game_path_str, binaries, game_name
 
 
 def _choose_best_ini(candidates: list[Path], root: Path) -> Path | None:
@@ -119,7 +132,7 @@ def _choose_best_ini(candidates: list[Path], root: Path) -> Path | None:
             s += 10
         if p.parent == root:
             s += 5
-        depth = len(p.resolve().relative_to(root.resolve()).parts)
+        depth = _depth_under(p, root)
         return s, -depth
 
     return sorted(candidates, key=score, reverse=True)[0]
@@ -160,7 +173,7 @@ def _guess_instance_root(root: Path, ini_path: Path | None, base_hint: str | Non
 
         if score < 8:
             continue
-        depth = len(cand.resolve().relative_to(root.resolve()).parts)
+        depth = _depth_under(cand, root)
         metric = (score, -depth, cand)
         if best is None or metric > best:
             best = metric
@@ -271,7 +284,7 @@ def _find_game_path(root: Path, instance_root: Path | None, old_hint: str | None
             s += 10
         if (p / "Data").is_dir():
             s += 3
-        depth = len(p.resolve().relative_to(root.resolve()).parts)
+        depth = _depth_under(p, root)
         return s, -depth
 
     return sorted(found, key=score, reverse=True)[0]
@@ -322,7 +335,7 @@ def _find_tool_root(root: Path, instance_root: Path | None) -> Path | None:
 
     def count_hits(tool_dir: Path) -> tuple[int, int, int]:
         hits = 0
-        for dirpath, _dirnames, filenames in _walk_dirs(tool_dir, max_depth=4):
+        for _dirpath, _dirnames, filenames in _walk_dirs(tool_dir, max_depth=4):
             for f in filenames:
                 if f.lower() in known_lower:
                     hits += 1
@@ -339,6 +352,7 @@ def _find_tool_root(root: Path, instance_root: Path | None) -> Path | None:
 
 
 def discover_from_root(root: Path, edition: str = "sse") -> DiscoveredPaths:
+    """모드팩 폴더에서 INI/인스턴스/게임/Tools 경로를 찾는다. edition="auto"면 INI의 gameName으로 정한다."""
     # resolve() 대신 abspath: 8.3 짧은 경로/subst 드라이브 표기를 유지해 INI에 쓰는 경로가 섞이지 않게 한다.
     root = Path(os.path.abspath(root.expanduser()))
     warnings: list[str] = []
@@ -360,9 +374,13 @@ def discover_from_root(root: Path, edition: str = "sse") -> DiscoveredPaths:
 
     base_hint = None
     game_hint = None
+    game_name = ""
     binaries: list[str] = []
     if ini_path:
-        base_hint, game_hint, binaries = _parse_ini_hints(ini_path)
+        base_hint, game_hint, binaries, game_name = _parse_ini_hints(ini_path)
+    if edition not in ("sse", "vr", "le"):
+        edition = edition_from_game_name(game_name)
+    if ini_path:
         if len(ini_candidates) > 1:
             warnings.append(
                 "ModOrganizer.ini가 여러 개 발견되어 하나를 자동 선택했습니다: " + str(ini_path)
@@ -387,4 +405,5 @@ def discover_from_root(root: Path, edition: str = "sse") -> DiscoveredPaths:
         game_path=game_path,
         tool_root=tool_root,
         warnings=tuple(warnings),
+        edition=edition,
     )

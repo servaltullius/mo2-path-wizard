@@ -121,3 +121,13 @@ def arg_preset_for(title: str, binary: str, ctx: ArgContext) -> str | None:
         return _fmt_args_qsettings(args)
 
     return None
+
+
+def edition_from_game_name(game_name: str) -> str:
+    """MO2 INI의 [General] gameName으로 에디션을 정한다(모르면 sse)."""
+    name = game_name.strip().lower()
+    if "vr" in name.split() or name.endswith(" vr"):
+        return "vr"
+    if name in ("skyrim", "enderal"):
+        return "le"
+    return "sse"

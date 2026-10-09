@@ -9,7 +9,7 @@ from pathlib import Path
 class ExecutableSpec:
     title: str
     exe_names: tuple[str, ...]
-    kind: str  # "tool" | "mod"
+    kind: str  # "tool"(Tools 폴더 우선) | "mod"(mods 폴더 우선) | "instance"(모드팩 루트 바로 아래)
     dir_hints: tuple[str, ...] = ()
     hide: bool = False
     toolbar: bool = False
@@ -18,10 +18,15 @@ class ExecutableSpec:
 
 
 DEFAULT_EXECUTABLE_SPECS: tuple[ExecutableSpec, ...] = (
-    ExecutableSpec(title="Edit", exe_names=("SSEEdit.exe",), kind="tool", dir_hints=("sseedit", "xedit")),
+    ExecutableSpec(
+        title="Edit",
+        exe_names=("SSEEdit.exe", "SSEEdit64.exe", "xEdit.exe", "xEdit64.exe"),
+        kind="tool",
+        dir_hints=("sseedit", "xedit"),
+    ),
     ExecutableSpec(
         title="Quick Auto Clean",
-        exe_names=("SSEEditQuickAutoClean.exe",),
+        exe_names=("SSEEditQuickAutoClean.exe", "xEditQuickAutoClean.exe"),
         kind="tool",
         dir_hints=("sseedit", "xedit"),
     ),
@@ -47,29 +52,74 @@ DEFAULT_EXECUTABLE_SPECS: tuple[ExecutableSpec, ...] = (
     ),
     ExecutableSpec(
         title="PGPatcher",
-        exe_names=("PGPatcher.exe",),
+        # ParallaxGen은 0.9.0(2025-10)에서 PGPatcher로 이름이 바뀌었다.
+        exe_names=("PGPatcher.exe", "ParallaxGen.exe"),
+        kind="tool",
+        dir_hints=("pgpatcher", "pg patcher", "parallaxgen", "paralaxgen", "proteus"),
+    ),
+    ExecutableSpec(
+        title="BodySlide x64",
+        exe_names=("BodySlide x64.exe",),
         kind="mod",
-        dir_hints=("pgpatcher", "pg patcher", "proteus"),
+        dir_hints=("bodyslide and outfit studio", "bodyslide"),
+    ),
+    ExecutableSpec(
+        title="Outfit Studio x64",
+        exe_names=("OutfitStudio x64.exe",),
+        kind="mod",
+        dir_hints=("bodyslide and outfit studio", "outfit studio", "bodyslide"),
+    ),
+    ExecutableSpec(title="LOOT", exe_names=("LOOT.exe",), kind="tool", dir_hints=("loot",)),
+    ExecutableSpec(title="BethINI", exe_names=("Bethini.exe",), kind="tool", dir_hints=("bethini",)),
+    ExecutableSpec(title="zEdit", exe_names=("zEdit.exe",), kind="tool", dir_hints=("zedit",)),
+    ExecutableSpec(
+        title="SSE-AT", exe_names=("SSE-AT.exe",), kind="tool", dir_hints=("sse-at", "auto translator")
+    ),
+    ExecutableSpec(
+        title="Dynamic Interface Patcher",
+        exe_names=("DIP.exe",),
+        kind="mod",
+        dir_hints=("dynamic interface patcher",),
+    ),
+    ExecutableSpec(
+        title="Cathedral Assets Optimizer",
+        exe_names=("Cathedral_Assets_Optimizer.exe", "Cathedral Assets Optimizer.exe"),
+        kind="tool",
+        dir_hints=("cathedral",),
+    ),
+    ExecutableSpec(
+        title="Explore Virtual Folder",
+        exe_names=("Explorer++.exe",),
+        kind="instance",
+        dir_hints=("explorer++",),
     ),
 )
 
 
-def _find_file_depth(root: Path, filename: str, max_depth: int) -> Path | None:
-    filename_l = filename.lower()
-    # resolve() 하면 8.3 짧은 경로/subst 드라이브가 다른 표기로 바뀌어 INI 경로가 섞이므로 원래 표기를 유지한다.
-    for dirpath, dirnames, filenames in os.walk(root):
-        try:
-            rel = Path(dirpath).relative_to(root)
-            depth = len(rel.parts)
-        except Exception:
-            depth = 0
-        if depth > max_depth:
-            dirnames[:] = []
-            continue
-        for f in filenames:
-            if f.lower() == filename_l:
-                return Path(dirpath) / f
-    return None
+class _FileIndex:
+    """폴더 아래 파일 이름(소문자) -> 첫 경로. 같은 폴더를 여러 번 훑지 않도록 캐시한다."""
+
+    def __init__(self) -> None:
+        self._indexes: dict[tuple[str, int], dict[str, Path]] = {}
+
+    def find(self, root: Path, filename: str, max_depth: int) -> Path | None:
+        key = (str(root).lower(), max_depth)
+        index = self._indexes.get(key)
+        if index is None:
+            index = {}
+            # resolve()하지 않는다: 8.3 짧은 경로/subst 드라이브 표기를 그대로 유지해야 INI 경로가 섞이지 않는다.
+            for dirpath, dirnames, filenames in os.walk(root):
+                try:
+                    depth = len(Path(dirpath).relative_to(root).parts)
+                except ValueError:
+                    depth = 0
+                if depth >= max_depth:
+                    dirnames[:] = []
+                dirnames.sort()
+                for f in filenames:
+                    index.setdefault(f.lower(), Path(dirpath) / f)
+            self._indexes[key] = index
+        return index.get(filename.lower())
 
 
 def locate_executable(
@@ -78,70 +128,55 @@ def locate_executable(
     instance_root: Path,
     tool_root: Path | None,
     max_depth: int = 4,
+    index: _FileIndex | None = None,
 ) -> Path | None:
+    idx = index or _FileIndex()
+
     def search_in_dir(root: Path) -> Path | None:
         for exe in spec.exe_names:
             direct = root / exe
             if direct.is_file():
                 return direct
-            found = _find_file_depth(root, exe, max_depth=max_depth)
+            found = idx.find(root, exe, max_depth)
             if found:
                 return found
         return None
 
     def search_in_mods() -> Path | None:
         mods_root = instance_root / "mods"
-        if not mods_root.is_dir():
+        if not mods_root.is_dir() or not spec.dir_hints:
             return None
-
         hints = tuple(h.lower() for h in spec.dir_hints if h.strip())
-        candidates = [d for d in mods_root.iterdir() if d.is_dir()]
-        if hints:
-            candidates = [d for d in candidates if any(h in d.name.lower() for h in hints)]
+        try:
+            mod_dirs = sorted(d for d in mods_root.iterdir() if d.is_dir())
+        except OSError:
+            return None
+        # 앞쪽 힌트(더 구체적인 이름)와 맞는 폴더부터 찾는다.
+        for hint in hints:
+            for mod_dir in mod_dirs:
+                if hint in mod_dir.name.lower():
+                    found = search_in_dir(mod_dir)
+                    if found:
+                        return found
+        return None
 
-        for mod_dir in candidates:
-            found = search_in_dir(mod_dir)
-            if found:
-                return found
+    def search_in_tools() -> Path | None:
+        if tool_root and tool_root.is_dir():
+            return search_in_dir(tool_root)
         return None
 
     if spec.kind == "tool":
-        if tool_root and tool_root.is_dir():
-            found = search_in_dir(tool_root)
-            if found:
-                return found
         # 일부 모드팩은 xEdit/DynDOLOD/xLODGen 등을 mods 폴더에 넣기도 함
-        return search_in_mods()
-
+        return search_in_tools() or search_in_mods()
     if spec.kind == "mod":
-        mods_root = instance_root / "mods"
-        if not mods_root.is_dir():
-            mods_root = None
-
-        mod_dirs: list[Path] = []
-        hints = tuple(h.lower() for h in spec.dir_hints if h.strip())
-        if mods_root:
-            if hints:
-                for d in mods_root.iterdir():
-                    if d.is_dir():
-                        name_l = d.name.lower()
-                        if any(h in name_l for h in hints):
-                            mod_dirs.append(d)
-            if not mod_dirs and hints:
-                mod_dirs = []
-            elif not mod_dirs:
-                mod_dirs = [d for d in mods_root.iterdir() if d.is_dir()]
-
-            for mod_dir in mod_dirs:
-                found = search_in_dir(mod_dir)
-                if found:
-                    return found
-
         # 일부 모드팩은 Nemesis/Pandora 등을 tools 폴더에 둘 수도 있음
-        if tool_root and tool_root.is_dir():
-            found = search_in_dir(tool_root)
-            if found:
-                return found
+        return search_in_mods() or search_in_tools()
+    if spec.kind == "instance":
+        for hint in spec.dir_hints:
+            for exe in spec.exe_names:
+                candidate = instance_root / hint / exe
+                if candidate.is_file():
+                    return candidate
         return None
 
     raise ValueError(f"Unknown spec.kind: {spec.kind}")

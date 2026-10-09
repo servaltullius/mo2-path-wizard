@@ -9,6 +9,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from mo2_path_wizard.discovery import discover_from_root
+from mo2_path_wizard.external import describe_changes
+from mo2_path_wizard.mo2proc import Mo2Status, check_mo2_status
 from mo2_path_wizard.patcher import (
     CustomExecutableEntry,
     PatchOptions,
@@ -26,6 +28,12 @@ class _PreviewContext:
     tool_root: Path | None
     executables: tuple[CustomExecutableEntry, ...]
     behavior_engine_auto_detect: bool = True
+    mo2_status: Mo2Status | None = None
+    missing_indices: frozenset[int] = frozenset()
+
+
+class _Mo2RunningError(RuntimeError):
+    """같은 모드팩의 MO2가 실행 중이라 적용을 멈췄다."""
 
 
 def _display_path(path: Path | None) -> str:
@@ -64,8 +72,24 @@ def _format_behavior_engine_detection(context: _PreviewContext) -> str:
     return "\n".join(lines)
 
 
+def _format_mo2_status(status: Mo2Status | None) -> str:
+    lines = ["[MO2 실행 상태]"]
+    if status is None or not status.supported:
+        lines.append("- 확인할 수 없음(Windows에서만 확인합니다). 적용 전에 MO2를 종료해 주세요.")
+    elif status.same_instance:
+        lines.append("- 이 모드팩의 MO2가 실행 중입니다. 적용하기 전에 MO2를 종료해 주세요.")
+        lines.append("  (MO2는 종료할 때 ModOrganizer.ini를 다시 써서 변경을 덮어씁니다)")
+    elif status.any_running:
+        lines.append("- 다른 MO2가 실행 중입니다: " + ", ".join(str(p) for p in status.running))
+    else:
+        lines.append("- 실행 중인 MO2 없음")
+    return "\n".join(lines)
+
+
 def _format_preview_context(context: _PreviewContext) -> str:
     lines = [
+        _format_mo2_status(context.mo2_status),
+        "",
         "[현재 감지된 경로]",
         f"- INI: {_display_path(context.ini_path)}",
         f"- 모드팩: {_display_path(context.instance_root)}",
@@ -81,7 +105,8 @@ def _format_preview_context(context: _PreviewContext) -> str:
     else:
         for entry in context.executables:
             title = entry.title or "(제목 없음)"
-            lines.append(f"{entry.index}. {title}")
+            mark = "  [warn] 실행 파일 없음" if entry.index in context.missing_indices else ""
+            lines.append(f"{entry.index}. {title}{mark}")
             if entry.binary:
                 lines.append(f"   실행 파일: {_display_ini_value(entry.binary)}")
             if entry.working_directory:
@@ -118,6 +143,20 @@ def _format_run_output(
         parts.append("[적용 예정 요약]" if dry_run else "[실행 결과]")
         parts.append(summary)
 
+    if report.external:
+        parts.append(
+            "[외부 툴 설정 파일]\n"
+            "DynDOLOD/BodySlide/Synthesis 등 툴 설정에 남은 옛 경로입니다. 적용하면 각 파일 옆에 .bak 백업을 만듭니다.\n\n"
+            + describe_changes(report.external)
+        )
+
+    if report.missing_binaries:
+        parts.append(
+            "[실행 파일이 없는 항목]\n"
+            "적용 후에도 실행 파일을 찾을 수 없습니다. MO2에서 경로를 확인하거나 항목을 정리해 주세요.\n"
+            + "\n".join(f"[warn] {e.index}. {e.title}: {_display_ini_value(e.binary)}" for e in report.missing_binaries)
+        )
+
     if report.diff:
         parts.append(
             "\n".join(
@@ -147,6 +186,7 @@ class _App(tk.Tk):
         self.tool_root = tk.StringVar()
 
         self.apply_arg_presets = tk.BooleanVar(value=False)
+        self.external_configs = tk.BooleanVar(value=True)
         self.overwrite_existing_args = tk.BooleanVar(value=False)
         self.auto_add_missing = tk.BooleanVar(value=True)
         self.behavior_engine_auto_detect = tk.BooleanVar(value=True)
@@ -155,7 +195,7 @@ class _App(tk.Tk):
         self.no_backup = tk.BooleanVar(value=False)
 
         self.lang = tk.StringVar(value="korean")
-        self.edition = tk.StringVar(value="sse")
+        self.edition = tk.StringVar(value="auto")
         self.args_json = tk.StringVar()
 
         self.show_advanced = tk.BooleanVar(value=False)
@@ -339,11 +379,17 @@ class _App(tk.Tk):
             variable=self.overwrite_existing_args,
             style="Card.TCheckbutton",
         ).grid(row=3, column=0, columnspan=2, sticky="w", pady=3)
+        ttk.Checkbutton(
+            option_grid,
+            text="툴 설정 파일(DynDOLOD·BodySlide·Synthesis 등)의 옛 경로도 고치기",
+            variable=self.external_configs,
+            style="Card.TCheckbutton",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=3)
 
         select_row = ttk.Frame(options, style="Card.TFrame")
         select_row.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         ttk.Label(select_row, text="게임 에디션", style="Card.TLabel").pack(side="left")
-        ttk.Combobox(select_row, textvariable=self.edition, values=["sse", "vr", "le"], width=6, state="readonly").pack(
+        ttk.Combobox(select_row, textvariable=self.edition, values=["auto", "sse", "vr", "le"], width=6, state="readonly").pack(
             side="left", padx=(6, 14)
         )
         ttk.Label(select_row, text="xEdit 언어", style="Card.TLabel").pack(side="left")
@@ -472,7 +518,7 @@ class _App(tk.Tk):
             return
 
         self._set_busy(True, "자동 감지 중...")
-        edition = self.edition.get().strip() or "sse"
+        edition = self.edition.get().strip() or "auto"
 
         def worker() -> None:
             try:
@@ -524,8 +570,14 @@ class _App(tk.Tk):
         self._set_output("")
 
     def _tag_for_line(self, line: str) -> str | None:
-        if line.startswith("[warn]"):
+        if line.startswith("[warn]") or "[warn]" in line or line.startswith("- warn:"):
             return "warn"
+        if line.startswith("    - "):
+            return "diff_del"
+        if line.startswith("    + "):
+            return "diff_add"
+        if line.startswith(("- ", "+ ")):
+            return None
         if line.startswith("@@"):
             return "diff_hunk"
         if line.startswith("+++ ") or line.startswith("--- "):
@@ -557,7 +609,7 @@ class _App(tk.Tk):
         except Exception:
             self.status.set("복사 실패")
 
-    def _snapshot_inputs(self, dry_run: bool) -> dict:
+    def _snapshot_inputs(self, dry_run: bool, force: bool = False) -> dict:
         """Tk 변수는 메인 스레드에서만 읽는다. 작업 스레드에는 이 스냅샷만 넘긴다."""
 
         def opt_path(var: tk.StringVar) -> Path | None:
@@ -566,13 +618,15 @@ class _App(tk.Tk):
 
         return {
             "dry_run": dry_run,
+            "force": force,
+            "external_configs": bool(self.external_configs.get()),
             "pack_root": opt_path(self.pack_root),
             "ini": opt_path(self.ini_path),
             "instance_root": opt_path(self.instance_root),
             "game_path": opt_path(self.game_path),
             "tool_root": opt_path(self.tool_root),
             "args_json": opt_path(self.args_json),
-            "edition": self.edition.get().strip() or "sse",
+            "edition": self.edition.get().strip() or "auto",
             "language": self.lang.get().strip() or "korean",
             "apply_arg_presets": bool(self.apply_arg_presets.get()),
             "overwrite_existing_args": bool(self.overwrite_existing_args.get()),
@@ -595,6 +649,14 @@ class _App(tk.Tk):
             ini = discovered.ini_path
         if ini is None or not ini.exists():
             raise FileNotFoundError("ModOrganizer.ini를 찾지 못했습니다. (모드팩 폴더 또는 ini를 선택해 주세요)")
+
+        mo2_status = check_mo2_status(ini)
+        if not inputs["dry_run"] and mo2_status.same_instance and not inputs["force"]:
+            raise _Mo2RunningError("이 모드팩의 MO2가 실행 중입니다.")
+
+        edition = inputs["edition"]
+        if edition == "auto" and discovered is not None:
+            edition = discovered.edition
 
         instance_root = inputs["instance_root"]
         if instance_root is None and discovered and discovered.instance_root:
@@ -633,8 +695,9 @@ class _App(tk.Tk):
             skip_auto_add_titles=tuple(skip_auto_add_titles),
             skip_arg_preset_titles=("Pandora Behaviour Engine+",) if inputs["skip_pandora"] else (),
             language=inputs["language"],
-            edition=inputs["edition"],
+            edition=edition,
             dry_run=inputs["dry_run"],
+            external_configs=inputs["external_configs"],
             backup=inputs["backup"],
             non_interactive=True,
             args_overrides=args_overrides,
@@ -654,15 +717,17 @@ class _App(tk.Tk):
             tool_root=tool_root,
             executables=inspect_custom_executables(ini) if ini and ini.exists() else (),
             behavior_engine_auto_detect=inputs["behavior_engine_auto_detect"],
+            mo2_status=mo2_status,
+            missing_indices=frozenset(e.index for e in report.missing_binaries),
         )
         return discovered, context, report
 
-    def _run_async(self, *, dry_run: bool) -> None:
+    def _run_async(self, *, dry_run: bool, force: bool = False) -> None:
         if self._busy:
             return
 
         self._set_busy(True, "자동 감지 + 미리보기 중..." if dry_run else "자동 감지 + 적용 중...")
-        inputs = self._snapshot_inputs(dry_run)
+        inputs = self._snapshot_inputs(dry_run, force)
 
         def worker() -> None:
             try:
@@ -713,6 +778,20 @@ class _App(tk.Tk):
         self.status.set("미리보기 완료" if dry_run else "적용 완료")
 
     def _on_run_error(self, exc: Exception) -> None:
+        if isinstance(exc, _Mo2RunningError):
+            self._set_busy(False, "MO2 실행 중")
+            proceed = messagebox.askyesno(
+                "MO2 실행 중",
+                "이 모드팩의 MO2가 실행 중입니다.\n"
+                "MO2는 종료할 때 ModOrganizer.ini를 다시 써서 지금 적용한 변경을 덮어씁니다.\n\n"
+                "MO2를 종료한 뒤 다시 적용하는 것을 권장합니다.\n"
+                "그래도 지금 적용할까요?",
+                icon="warning",
+                default="no",
+            )
+            if proceed:
+                self._run_async(dry_run=False, force=True)
+            return
         self._set_busy(False, "오류")
         messagebox.showerror("오류", str(exc))
 

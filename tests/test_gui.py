@@ -1,7 +1,9 @@
 import unittest
 from pathlib import Path
 
+from mo2_path_wizard.external import ExternalChange
 from mo2_path_wizard.gui import _App, _PreviewContext, _format_run_output
+from mo2_path_wizard.mo2proc import Mo2Status
 from mo2_path_wizard.patcher import CustomExecutableEntry, PatchReport
 
 
@@ -63,6 +65,66 @@ class TestGuiPreviewOutput(unittest.TestCase):
         self.assertIn("[변경 diff]", output)
         self.assertIn("- 는 현재 파일, + 는 적용 후 내용입니다.", output)
         self.assertLess(output.index("[현재 등록된 실행 파일]"), output.index("[변경 diff]"))
+
+
+    def test_output_shows_mo2_status_external_configs_and_missing_executables(self) -> None:
+        missing = CustomExecutableEntry(index=24, title="EasyNPC", binary="G:/Pack/TOOLS/EasyNPC/EasyNPC.exe", working_directory="", arguments="")
+        context = _PreviewContext(
+            ini_path=Path("G:/Pack/ModOrganizer.ini"),
+            instance_root=Path("G:/Pack"),
+            game_path=None,
+            tool_root=None,
+            executables=(missing,),
+            mo2_status=Mo2Status(supported=True, running=(Path("G:/Pack/ModOrganizer.exe"),), same_instance=True),
+            missing_indices=frozenset({24}),
+        )
+        report = PatchReport(
+            ok=True,
+            changed=True,
+            summary="dry-run: 파일은 수정하지 않았습니다.",
+            diff="",
+            missing_binaries=(missing,),
+            external=(
+                ExternalChange(
+                    tool="BethINI",
+                    path=Path("G:/Pack/TOOLS/BethINI/BethINI.ini"),
+                    changed_lines=(("sGamePath=D:\\Pack\\Stock Game\\", "sGamePath=G:\\Pack\\Stock Game\\"),),
+                    count=1,
+                    sensitive=False,
+                    new_bytes=b"",
+                ),
+                ExternalChange(
+                    tool="SSE-AT",
+                    path=Path("G:/Pack/TOOLS/SSE-AT/data/user/config.json"),
+                    changed_lines=(),
+                    count=3,
+                    sensitive=True,
+                    new_bytes=b"",
+                ),
+            ),
+        )
+
+        output = _format_run_output(dry_run=True, context=context, discovery_warnings=(), report=report)
+
+        self.assertIn("[MO2 실행 상태]", output)
+        self.assertIn("이 모드팩의 MO2가 실행 중입니다", output)
+        self.assertIn("24. EasyNPC  [warn] 실행 파일 없음", output)
+        self.assertIn("[외부 툴 설정 파일]", output)
+        self.assertIn("[BethINI]", output)
+        self.assertIn("민감한 정보", output)
+        self.assertIn("[실행 파일이 없는 항목]", output)
+
+    def test_external_config_option_is_on_by_default(self) -> None:
+        app = _App()
+        try:
+            app.withdraw()
+            self.assertTrue(app.external_configs.get())
+            self.assertEqual("auto", app.edition.get())
+            inputs = app._snapshot_inputs(dry_run=True)
+            self.assertTrue(inputs["external_configs"])
+            self.assertFalse(inputs["force"])
+        finally:
+            app.destroy()
 
 
 if __name__ == "__main__":

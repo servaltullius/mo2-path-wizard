@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 
 from .discovery import discover_from_root
+from .external import describe_changes
+from .mo2proc import check_mo2_status
 from .patcher import PatchOptions, patch_modorganizer_ini
 
 
@@ -76,9 +78,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--edition",
-        default="sse",
-        choices=["sse", "vr", "le"],
-        help="게임 에디션. 기본: sse",
+        default="auto",
+        choices=["auto", "sse", "vr", "le"],
+        help="게임 에디션. 기본: auto(INI의 gameName으로 판단)",
+    )
+    parser.add_argument(
+        "--no-external-configs",
+        action="store_true",
+        help="DynDOLOD/BodySlide/Synthesis 등 툴 설정 파일의 경로는 고치지 않음(기본: 함께 고침)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="같은 모드팩의 MO2가 실행 중이어도 적용(권장하지 않음: MO2가 종료할 때 INI를 덮어씀)",
     )
     parser.add_argument("--dry-run", action="store_true", help="파일에 쓰지 않고 diff만 출력")
     parser.add_argument(
@@ -101,9 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("Error: --root 또는 --ini 중 하나는 필수입니다.")
 
     discovery_warnings: list[str] = []
+    edition = args.edition
     if args.root is not None:
         discovered = discover_from_root(args.root, edition=args.edition)
         discovery_warnings.extend(discovered.warnings)
+        edition = discovered.edition if args.edition == "auto" else args.edition
         if args.ini is None:
             args.ini = discovered.ini_path
         if args.instance_root is None:
@@ -114,7 +128,18 @@ def main(argv: list[str] | None = None) -> int:
             args.tool_root = discovered.tool_root
 
     if args.ini is None:
+        for w in discovery_warnings:
+            print(f"[warn] {w}")
         raise SystemExit("Error: ModOrganizer.ini를 찾지 못했습니다. --ini로 직접 지정해 주세요.")
+
+    if not args.dry_run:
+        status = check_mo2_status(args.ini)
+        if status.same_instance and not args.force:
+            print("Error: 이 모드팩의 MO2가 실행 중입니다. MO2를 종료한 뒤 다시 실행해 주세요.")
+            print("       (MO2는 종료할 때 ModOrganizer.ini를 다시 써서 변경을 덮어씁니다. 무시하려면 --force)")
+            return 3
+        if status.any_running and not status.same_instance:
+            discovery_warnings.append("다른 MO2가 실행 중입니다: " + ", ".join(str(p) for p in status.running))
 
     args_overrides: dict[str, str] = {}
     if args.args_json:
@@ -143,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
         skip_auto_add_titles=tuple(skip_auto_add_titles),
         skip_arg_preset_titles=("Pandora Behaviour Engine+",) if args.skip_pandora else (),
         language=args.lang,
-        edition=args.edition,
+        edition=edition,
+        external_configs=not args.no_external_configs,
         dry_run=args.dry_run,
         backup=not args.no_backup,
         non_interactive=args.non_interactive,
@@ -164,6 +190,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if report.diff:
         print(report.diff)
+    if report.external:
+        print("[외부 툴 설정 파일]")
+        print(describe_changes(report.external))
+        print()
+    if report.missing_binaries:
+        print("[실행 파일이 없는 항목] MO2에서 경로를 확인하거나 항목을 정리해 주세요.")
+        for e in report.missing_binaries:
+            print(f"- {e.index}. {e.title}: {e.binary}")
+        print()
     print(report.summary)
 
     return 0 if report.ok else 2
