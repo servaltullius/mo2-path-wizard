@@ -33,6 +33,7 @@
   - 명령: `python -m unittest discover -s tests -p "test*.py" -v`
   - 결과: 테스트 `21`개 통과
 - CI에서 PyInstaller로 CLI/GUI 실행 파일을 빌드했습니다.
+- 빌드된 CLI 실행 파일로 `--help`와 실제 `G:\TAKEALOOK` dry-run(`--auto-add-missing` 포함)을 확인했습니다. 이미 올바른 모드팩이라 변경 없음으로 나오고 INI는 수정되지 않았습니다.
 
 ## 권장 다운로드
 
@@ -42,3 +43,11 @@
 
 - `mo2-path-wizard-gui.exe`
 - `mo2-path-wizard.exe`
+
+## SHA256
+
+```text
+C5A9C5CD84F77EA1EEB2FBBB022C8A40795EAE7710E7FD79F4E9504EAC5061B2  mo2-path-wizard-gui.zip
+7B4EE28256068B72FC5A9F42C69DA1172A1BE5654F5C664BFBBC218DE93EA8D1  mo2-path-wizard-gui.exe
+A501AD061AAEB925F00E213D350D82A3EAD993CB67147AA4CB92995E255C7FC1  mo2-path-wizard.exe
+```
