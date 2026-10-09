@@ -78,3 +78,20 @@ MO2는 종료할 때 `ModOrganizer.ini`를 다시 써서 변경을 덮어씁니�
 - 빌드된 실행 파일로 확인한 것:
   - 실제 Windows에서 실행 중인 MO2를 감지했습니다.
   - 실제 모드팩 dry-run에서 툴 설정 파일 12개의 옛 경로(`D:\TAKEALOOK`)를 찾았습니다(파일은 수정하지 않음).
+
+## 권장 다운로드
+
+- `mo2-path-wizard-gui.zip`
+
+## 추가 다운로드
+
+- `mo2-path-wizard-gui.exe`
+- `mo2-path-wizard.exe`
+
+## SHA256
+
+```text
+486D2BCC8B988DB6BDD713A6A03B42DA84D639C6989A43D745DAAEFBC741303F  mo2-path-wizard-gui.zip
+D5F02189BAF28EEF82B0530F7609C47E0029DACF7E52397E6FB3673E0249FB9D  mo2-path-wizard-gui.exe
+8D202B997AB1C910939B1013C5F8D1ED4BC6F36D9CB1032467039623CB2BFD9E  mo2-path-wizard.exe
+```
