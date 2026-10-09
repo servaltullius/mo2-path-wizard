@@ -1,5 +1,33 @@
 # 변경 내역
 
+## v1.0.8 - 2026-10-09
+
+### 요약
+
+이번 릴리즈는 `ModOrganizer.ini`를 망가뜨리거나 사용자 설정을 지울 수 있던 문제들을 고친 긴급 수정 버전입니다.
+
+### 수정
+
+- `arguments 프리셋 적용`이 게임 실행 파일과 zEdit에 xEdit 인자를 넣던 문제를 수정했습니다.
+  - 이름에 `edit`이 들어 있는지("Skyrim Special Ed**it**ion")가 아니라 실행 파일 이름으로 대상을 판정합니다.
+  - `SSEEdit64.exe`, `xEdit.exe`/`xEdit64.exe`(이름을 바꾼 xEdit) 등도 인식하며, 이름을 바꾼 xEdit에는 게임 모드 플래그(`-sse`)를 함께 넣습니다.
+- `arguments 프리셋 적용`이 기본으로 **비어 있는 arguments에만** 적용됩니다. 직접 넣어 둔 xEdit 플래그(`-C:`, `-B:`, `-PseudoESL` 등)나 DynDOLOD/xLODGen의 `-o:` 출력 폴더가 더 이상 지워지지 않습니다.
+  - 기존 값까지 바꾸려면 CLI `--overwrite-args`, GUI `기존 arguments도 프리셋으로 덮어쓰기`를 켭니다.
+- `[customExecutables]`에 `size=` 줄이 없거나 `size`보다 큰 번호의 항목이 있을 때, 누락 실행 파일 자동 추가가 기존 항목을 덮어쓰던 문제를 수정했습니다.
+- 한글 등 비 ASCII 문자가 들어간 게임 경로가 `gamePath=@ByteArray(...)`에 MO2(Qt)가 읽지 못하는 형식으로 기록되던 문제를 수정했습니다. 이전 버전이 기록한 형식도 그대로 읽습니다.
+- 경로 치환을 개선했습니다.
+  - `D:\TAKEALOOK`를 옮길 때 이름이 비슷한 `D:\TAKEALOOK - Outputs`까지 바뀌던 문제
+  - 새 위치가 옛 위치 안쪽일 때 `.../Pack/Pack/Pack/...`처럼 중복 치환되던 문제
+  - `d:/old`와 `D:/Old`처럼 대소문자만 다른 경로를 놓치던 문제
+- GUI에서 오류가 나면 창이 "작업 중" 상태로 멈추고 오류 메시지가 뜨지 않던 문제를 수정했습니다.
+- `python -m mo2_path_wizard --root ...`가 tkinter 없는 환경에서 실행되지 않던 문제를 수정했습니다.
+- xEdit/DynDOLOD VR·LE 게임 모드 플래그를 `-tes5vr`/`-tes5`로 바로잡았습니다.
+
+### 검증
+
+- 회귀 테스트를 추가했습니다(Qt `QSettings` 실제 출력과 비교한 `@ByteArray` 인코딩 포함). 새 회귀 테스트는 v1.0.7 코드에서 실패하는 것을 확인했습니다.
+- 실제 모드팩 `ModOrganizer.ini` 복사본으로 이동 시뮬레이션을 해 기존 경로가 남지 않는 것과 두 번째 실행이 변경 없음인 것을 확인했습니다.
+
 ## v1.0.7 - 2026-10-09
 
 ### 요약

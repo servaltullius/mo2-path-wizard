@@ -6,6 +6,8 @@ MO2(Mod Organizer 2) 모드팩(특히 Stock Game 구성)에서 **깨진 경로/�
 
 - `ModOrganizer.ini`의 `base_directory`, `gamePath`, `[customExecutables]`의 `binary/workingDirectory/arguments`에 들어있는 경로를 새 위치에 맞게 갱신
 - (옵션) xEdit/DynDOLOD/xLODGen/Pandora 등 일부 툴의 **권장 arguments 템플릿**을 적용
+  - 실행 파일 이름(`SSEEdit.exe`, `xEdit64.exe`, `DynDOLODx64.exe` 등)으로 대상을 판정하며, 게임 실행 파일과 zEdit에는 적용하지 않습니다.
+  - 기본은 arguments가 비어 있는 항목에만 적용합니다. 이미 있는 arguments까지 바꾸려면 `--overwrite-args`(GUI: `기존 arguments도 프리셋으로 덮어쓰기`)를 켭니다.
 - 적용 전 `.bak` 백업 + `--dry-run` 미리보기(diff) 지원
 - GUI 미리보기에서 현재 감지된 경로와 `[customExecutables]` 실행 파일 목록 확인
 - Pandora/Nemesis 실행 항목은 현재 INI 상태를 보고 자동 판단
